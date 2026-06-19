@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-neutral-300 font-sans antialiased overflow-x-hidden min-h-screen selection:bg-accent-cyan/20 selection:text-accent-cyan;
+    
+    /* CSS Grid backdrop overlay pattern (faint #ffffff08 lines) */
+    background-image: 
+      linear-gradient(rgba(255, 255, 255, 0.003) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.003) 1px, transparent 1px);
+    background-size: 50px 50px;
+    background-color: #0A0A0A;
+  }
+}
+
+@layer utilities {
+  /* Premium Glassmorphism Card styling */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  
+  .glass-card-hover {
+    @apply transition-all duration-300;
+  }
+  
+  .glass-card-hover:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(0, 245, 255, 0.25);
+    box-shadow: 0 0 20px rgba(0, 245, 255, 0.04);
+    transform: translateY(-1px) scale(1.005);
+  }
+
+  /* Custom terminal scrollbars */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
