@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ChevronLeft, LogOut, Terminal, Clipboard, Check, Activity, ShieldAlert, Cpu, HardDrive, Percent, Clock } from 'lucide-react'
+import { ChevronLeft, LogOut, Terminal, Clipboard, Check, Activity, ShieldAlert, Cpu, HardDrive, Percent, Clock, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import ConnectionStatus from '../components/ConnectionStatus'
 import MetricChart from '../components/MetricChart'
 import SeverityBadge from '../components/SeverityBadge'
+import ConfidenceRing from '../components/ConfidenceRing'
+import AnomalyScoreBar from '../components/AnomalyScoreBar'
+import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 export const ServiceDetail = () => {
   const { id } = useParams()
@@ -16,10 +19,23 @@ export const ServiceDetail = () => {
   const services = useStore((state) => state.services)
   const historicalMetrics = useStore((state) => state.historicalMetrics)
   const alerts = useStore((state) => state.alerts)
+  const incidents = useStore((state) => state.incidents)
+  const setIncidents = useStore((state) => state.setIncidents)
+  const resolveIncidentOptimistic = useStore((state) => state.resolveIncidentOptimistic)
 
   const [timeframe, setTimeframe] = useState('1h')
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState('metrics') // 'metrics' | 'timeline' | 'sdk'
+
+  // Forecast states
+  const [cpuForecast, setCpuForecast] = useState([])
+  const [memoryForecast, setMemoryForecast] = useState([])
+  const [errorRateForecast, setErrorRateForecast] = useState([])
+  const [responseTimeForecast, setResponseTimeForecast] = useState([])
+
+  // Anomalies states
+  const [anomalies, setAnomalies] = useState([])
+  const [isAnomaliesLoading, setIsAnomaliesLoading] = useState(false)
 
   // Redirect if unauthenticated
   useEffect(() => {
@@ -27,13 +43,6 @@ export const ServiceDetail = () => {
   }, [token, navigate])
 
   const service = services.find((s) => s.id === id)
-  if (!service) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background font-mono text-xs">
-        <p className="text-status-critical">ERROR: SERVICE_NOT_FOUND_OR_ACCESS_DENIED</p>
-      </div>
-    )
-  }
 
   // Load telemetry metrics lists
   const serviceHistory = historicalMetrics[id] || {
@@ -46,18 +55,224 @@ export const ServiceDetail = () => {
   // Filter alerts for this service
   const serviceAlerts = alerts.filter((a) => a.service_id === id)
 
+  // Filter incidents for this service
+  const serviceIncidents = incidents.filter(
+    (incident) => incident.root_cause_service_id === id || incident.affected_service_ids?.includes(id)
+  )
+
+  // Fetch forecast metrics
+  useEffect(() => {
+    if (!service) return
+
+    const metricTypes = ['cpu', 'memory', 'error_rate', 'response_time']
+    const setters = {
+      cpu: setCpuForecast,
+      memory: setMemoryForecast,
+      error_rate: setErrorRateForecast,
+      response_time: setResponseTimeForecast
+    }
+
+    if (token && token !== 'demo_jwt_token_key_devpulse') {
+      metricTypes.forEach(metricType => {
+        fetch(`/api/analytics/${id}/forecast?metric_type=${metricType}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data && Array.isArray(data.forecast)) {
+            setters[metricType](data.forecast)
+          } else {
+            setters[metricType]([])
+          }
+        })
+        .catch(err => {
+          console.warn(`Could not load forecast for ${metricType} from backend:`, err)
+          setters[metricType]([])
+        })
+      })
+    } else {
+      // Mock forecast telemetry for demo mode
+      const now = Date.now()
+      metricTypes.forEach(metricType => {
+        const history = serviceHistory[metricType] || []
+        const lastValue = history.length > 0 ? history[history.length - 1].value : (metricType === 'response_time' ? 120 : 50)
+        const mockForecast = []
+        for (let i = 1; i <= 15; i++) {
+          let val = lastValue
+          if (metricType === 'cpu') val = Math.max(10, Math.min(95, lastValue + (Math.random() - 0.4) * 8))
+          else if (metricType === 'memory') val = Math.max(20, Math.min(90, lastValue + (Math.random() - 0.4) * 4))
+          else if (metricType === 'error_rate') val = Math.max(0, Math.min(5, lastValue + (Math.random() - 0.4) * 0.5))
+          else if (metricType === 'response_time') val = Math.max(30, Math.min(800, lastValue + (Math.random() - 0.4) * 40))
+
+          mockForecast.push({
+            timestamp: new Date(now + i * 60000).toISOString(),
+            value: val
+          })
+        }
+        setters[metricType](mockForecast)
+      })
+    }
+  }, [token, id, service, serviceHistory.cpu, serviceHistory.memory, serviceHistory.error_rate, serviceHistory.response_time])
+
+  // Fetch anomalies for this service
+  useEffect(() => {
+    if (!service) return
+
+    if (token && token !== 'demo_jwt_token_key_devpulse') {
+      setIsAnomaliesLoading(true)
+      fetch(`/api/analytics/${id}/anomalies?hours=24`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setAnomalies(data)
+        } else {
+          setAnomalies([])
+        }
+      })
+      .catch(err => {
+        console.warn('Could not load anomalies from backend:', err)
+        setAnomalies([])
+      })
+      .finally(() => {
+        setIsAnomaliesLoading(false)
+      })
+    } else {
+      // Mock anomalies for demo mode
+      const now = Date.now()
+      const mockAnoms = [
+        {
+          id: 'anom-cpu-1',
+          service_id: id,
+          metric_type: 'cpu',
+          score: 4.8,
+          detected_at: new Date(now - 15 * 60000).toISOString(),
+          context: { explanation: 'CPU spike to 94.2% matched historical anomaly pattern.' }
+        },
+        {
+          id: 'anom-mem-2',
+          service_id: id,
+          metric_type: 'memory',
+          score: 3.2,
+          detected_at: new Date(now - 90 * 60000).toISOString(),
+          context: { explanation: 'Memory allocation exceeded 88.5% of reservoir limits.' }
+        },
+        {
+          id: 'anom-err-3',
+          service_id: id,
+          metric_type: 'error_rate',
+          score: 2.6,
+          detected_at: new Date(now - 180 * 60000).toISOString(),
+          context: { explanation: 'Error rate elevated to 2.8% on gateway routing.' }
+        },
+        {
+          id: 'anom-lat-4',
+          service_id: id,
+          metric_type: 'response_time',
+          score: 3.9,
+          detected_at: new Date(now - 320 * 60000).toISOString(),
+          context: { explanation: 'Response latency exceeded warning threshold of 500ms.' }
+        }
+      ]
+      setAnomalies(mockAnoms)
+    }
+  }, [token, id, service])
+
+  // Load incidents from backend on service detail mount
+  useEffect(() => {
+    if (token && token !== 'demo_jwt_token_key_devpulse') {
+      fetch('/api/incidents/', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setIncidents(data)
+        }
+      })
+      .catch(err => console.warn('Could not load incidents in service details:', err))
+    }
+  }, [token, setIncidents])
+
+  if (!service) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background font-mono text-xs">
+        <p className="text-status-critical">ERROR: SERVICE_NOT_FOUND_OR_ACCESS_DENIED</p>
+      </div>
+    )
+  }
+
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // --- MOCK ANOMALIES TIMELINE DATA ---
-  const timelinePoints = [
-    { time: '10 mins ago', label: 'CPU spike', severity: 'medium', score: 3.2 },
-    { time: '28 mins ago', label: 'Latency timeout', severity: 'critical', score: 4.8 },
-    { time: '45 mins ago', label: 'Memory leak warning', severity: 'low', score: 2.6 },
-  ]
+  const getElapsedMinutes = (startedAt) => {
+    try {
+      const elapsedMs = Date.now() - new Date(startedAt).getTime()
+      return Math.max(0, Math.floor(elapsedMs / 60000))
+    } catch {
+      return 0
+    }
+  }
+
+  const handleResolveIncident = async (incidentId) => {
+    resolveIncidentOptimistic(incidentId)
+    
+    if (token && token !== 'demo_jwt_token_key_devpulse') {
+      try {
+        await fetch(`/api/incidents/${incidentId}/resolve`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      } catch (err) {
+        console.warn('Could not resolve incident on backend:', err)
+      }
+    }
+  }
+
+  // Format scatter data for Recharts
+  const scatterData = anomalies.map((anom) => ({
+    x: new Date(anom.detected_at).getTime(),
+    y: parseFloat(anom.score),
+    z: parseFloat(anom.score),
+    ...anom
+  }))
+
+  const formatScatterXAxis = (tick) => {
+    try {
+      const date = new Date(tick)
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return ''
+    }
+  }
+
+  const ScatterTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload
+      const timeStr = new Date(data.x).toLocaleString()
+      const explanation = data.context?.explanation || data.context?.reason || 'Anomaly detected in telemetry metric.'
+      
+      return (
+        <div className="bg-[#0A0A0A]/95 border border-white/8 px-3 py-2 rounded shadow-2xl font-mono text-[9px] text-left max-w-xs backdrop-blur-md">
+          <p className="text-neutral-500 mb-1">{timeStr}</p>
+          <p className="font-bold text-white uppercase mb-0.5">
+            Metric: <span className="text-accent-cyan">{data.metric_type.toUpperCase()}</span>
+          </p>
+          <p className="font-bold text-white uppercase mb-1">
+            Anomaly Score: <span className="text-status-critical">{data.y.toFixed(2)}</span>
+          </p>
+          <div className="border-t border-white/5 pt-1 mt-1 text-[9px] text-neutral-400 font-sans leading-normal">
+            {explanation}
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
 
   // --- PYTHON SDK SNIPPET (Syntax colored) ---
   const sdkCode = `import requests
@@ -117,16 +332,16 @@ if __name__ == "__main__":
 
         <div className="flex items-center space-x-4">
           <ConnectionStatus />
-          <div className="flex items-center space-x-2 border-l border-white/6 pl-4">
+          <div className="flex items-center space-x-2 border-l border-white/6 pl-4 font-mono text-xs">
             <button 
               onClick={() => navigate('/dashboard')} 
-              className="text-xs font-mono font-semibold text-neutral-400 hover:text-white transition-all tracking-wider uppercase cursor-pointer"
+              className="text-neutral-400 hover:text-white transition-all tracking-wider uppercase cursor-pointer"
             >
               Dashboard
             </button>
             <button 
               onClick={() => navigate('/services')} 
-              className="text-xs font-mono font-semibold text-neutral-400 hover:text-white transition-all tracking-wider uppercase ml-3 cursor-pointer"
+              className="text-neutral-400 hover:text-white transition-all tracking-wider uppercase ml-3 cursor-pointer"
             >
               Services
             </button>
@@ -191,58 +406,201 @@ if __name__ == "__main__":
       <div className="flex-1 w-full">
         {activeTab === 'metrics' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <MetricChart data={serviceHistory.cpu} title="CPU_LOAD" color="#00F5FF" yUnit="%" />
-            <MetricChart data={serviceHistory.memory} title="MEMORY_RESERVE" color="#10B981" yUnit="%" />
-            <MetricChart data={serviceHistory.error_rate} title="ERROR_RATES" color="#F43F5E" yUnit="%" />
-            <MetricChart data={serviceHistory.response_time} title="RESPONSE_LATENCY" color="#F59E0B" yUnit="ms" />
+            <MetricChart data={serviceHistory.cpu} forecastData={cpuForecast} title="CPU_LOAD" color="#00F5FF" yUnit="%" />
+            <MetricChart data={serviceHistory.memory} forecastData={memoryForecast} title="MEMORY_RESERVE" color="#10B981" yUnit="%" />
+            <MetricChart data={serviceHistory.error_rate} forecastData={errorRateForecast} title="ERROR_RATES" color="#F43F5E" yUnit="%" />
+            <MetricChart data={serviceHistory.response_time} forecastData={responseTimeForecast} title="RESPONSE_LATENCY" color="#F59E0B" yUnit="ms" />
           </div>
         )}
 
         {activeTab === 'timeline' && (
           <div className="space-y-6">
-            {/* Horizontal timeline track */}
-            <div className="glass-card p-6 rounded border-white/6 text-left relative overflow-hidden">
-              <h3 className="text-xs font-semibold text-white uppercase tracking-widest mb-6">
-                Horizontal Anomaly Track (Last 24 Hours)
-              </h3>
+            
+            {/* Scatter Chart grid container */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
               
-              <div className="h-4 bg-white/3 border border-white/6 rounded-full relative flex items-center mb-8">
-                {/* Horizontal time grids */}
-                <div className="absolute inset-0 flex justify-between px-6 text-[8px] font-mono text-neutral-600 select-none">
-                  <span>-24H</span>
-                  <span>-18H</span>
-                  <span>-12H</span>
-                  <span>-6H</span>
-                  <span>NOW</span>
+              {/* Scatter Chart map */}
+              <div className="lg:col-span-2 glass-card p-5 rounded border-white/6 text-left flex flex-col justify-between h-[360px]">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex flex-col space-y-1">
+                    <h3 className="text-xs font-semibold text-white uppercase tracking-widest font-mono">
+                      Anomaly Score Scatter Map
+                    </h3>
+                    <p className="text-[9px] text-neutral-500 font-mono uppercase tracking-wider">
+                      Scatter dots representing ML anomaly confidence over the last 24 hours
+                    </p>
+                  </div>
+                  <span className="font-mono text-[8px] text-status-critical bg-status-critical/8 border border-status-critical/15 px-2 py-0.5 rounded uppercase">
+                    ML_ENGINE
+                  </span>
                 </div>
-                
-                {/* Simulated Anomaly flags on track */}
-                <div className="absolute left-1/4 w-3.5 h-3.5 bg-status-warning rounded-full border-2 border-[#0A0A0A] shadow-[0_0_8px_#F59E0B] cursor-pointer" title="Z-Score: 2.6" />
-                <div className="absolute left-[58%] w-3.5 h-3.5 bg-status-critical rounded-full border-2 border-[#0A0A0A] shadow-[0_0_8px_#F43F5E] cursor-pointer" title="Z-Score: 4.8" />
-                <div className="absolute left-[88%] w-3.5 h-3.5 bg-status-warning rounded-full border-2 border-[#0A0A0A] shadow-[0_0_8px_#F59E0B] cursor-pointer" title="Z-Score: 3.2" />
+
+                <div className="flex-1 w-full min-h-[220px]">
+                  {isAnomaliesLoading ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center space-y-2 select-none">
+                      <div className="w-5 h-5 border-2 border-status-critical border-t-transparent rounded-full animate-spin" />
+                      <span className="font-mono text-[8px] text-neutral-500 tracking-widest">LOADING_ANOMALIES</span>
+                    </div>
+                  ) : scatterData.length === 0 ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center space-y-1 select-none border border-white/5 border-dashed rounded bg-white/[0.003]">
+                      <Clock className="w-6 h-6 text-neutral-600 mb-1" />
+                      <span className="font-mono text-[8px] text-neutral-500 uppercase tracking-widest">NO_ANOMALIES_FOUND_24H</span>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart margin={{ top: 10, right: 15, left: -22, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.015)" />
+                        <XAxis 
+                          dataKey="x" 
+                          tickFormatter={formatScatterXAxis} 
+                          stroke="rgba(255,255,255,0.08)"
+                          tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 7, fontFamily: 'JetBrains Mono' }}
+                          type="number"
+                          domain={['auto', 'auto']}
+                        />
+                        <YAxis 
+                          dataKey="y"
+                          name="Score"
+                          stroke="rgba(255,255,255,0.08)"
+                          tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 7, fontFamily: 'JetBrains Mono' }}
+                          domain={[0, 'auto']}
+                        />
+                        <ZAxis 
+                          dataKey="z" 
+                          range={[40, 300]} 
+                        />
+                        <Tooltip content={<ScatterTooltip />} cursor={{ strokeDasharray: '3 3', stroke: 'rgba(255,255,255,0.05)' }} />
+                        <Scatter name="Anomalies" data={scatterData} fill="#F43F5E" line={false} />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
               </div>
 
-              {/* Anomaly list */}
-              <div className="space-y-3 font-mono text-xs">
-                {timelinePoints.map((pt, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-white/2 border border-white/4 rounded">
-                    <div className="flex items-center space-x-3">
-                      <span className={`w-2 h-2 rounded-full ${pt.severity === 'critical' ? 'bg-status-critical shadow-[0_0_8px_#F43F5E]' : 'bg-status-warning shadow-[0_0_8px_#F59E0B]'}`} />
-                      <span className="font-bold text-white uppercase">{pt.label}</span>
+              {/* Incidents involvement list */}
+              <div className="glass-card p-5 rounded border-white/6 text-left flex flex-col h-[360px]">
+                <div className="flex flex-col space-y-1 mb-4">
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-widest font-mono">
+                    Incident Involvement
+                  </h3>
+                  <p className="text-[9px] text-neutral-500 font-mono uppercase tracking-wider">
+                    Incidents cascading through or caused by this service
+                  </p>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                  {serviceIncidents.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center space-y-1 select-none border border-white/5 border-dashed rounded bg-white/[0.003] p-4 text-center">
+                      <ShieldAlert className="w-6 h-6 text-neutral-600 mb-1" />
+                      <span className="font-mono text-[8px] text-neutral-500 uppercase tracking-widest font-bold">
+                        SERVICE_IS_HEALTHY
+                      </span>
+                      <p className="text-[9px] text-neutral-600 font-mono mt-1">
+                        NO_ACTIVE_OR_RESOLVED_INCIDENTS
+                      </p>
                     </div>
-                    <div className="flex items-center space-x-4">
-                      <span className="text-neutral-500">{pt.time.toUpperCase()}</span>
-                      <SeverityBadge severity={pt.severity} />
-                      <span className="text-accent-cyan font-bold">SCORE: {pt.score}</span>
-                    </div>
-                  </div>
-                ))}
+                  ) : (
+                    serviceIncidents.map((inc) => (
+                      <div 
+                        key={inc.id} 
+                        className="p-3 bg-white/2 border border-white/4 hover:border-white/8 transition-all rounded space-y-2.5 font-mono text-[10px]"
+                      >
+                        <div className="flex items-center justify-between flex-wrap gap-1">
+                          <span className="font-bold text-white">
+                            INCIDENT_{inc.id.substring(0, 8).toUpperCase()}
+                          </span>
+                          
+                          {inc.resolved_at ? (
+                            <span className="text-[7px] font-bold text-status-healthy px-1 bg-status-healthy/10 border border-status-healthy/20 rounded uppercase">
+                              RESOLVED
+                            </span>
+                          ) : (
+                            <span className="text-[7px] font-bold text-status-critical px-1 bg-status-critical/10 border border-status-critical/20 rounded uppercase animate-pulse">
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-neutral-400 font-sans text-[11px] leading-relaxed">
+                          {inc.summary || "Grouped incident propagation."}
+                        </p>
+
+                        <div className="flex items-center justify-between border-t border-white/5 pt-2 mt-1">
+                          <span className="text-[8px] text-neutral-500">
+                            Role: {inc.root_cause_service_id === id ? '🚨 Root Cause' : '🔗 Affected'}
+                          </span>
+                          {!inc.resolved_at && (
+                            <button
+                              onClick={() => handleResolveIncident(inc.id)}
+                              className="px-2 py-0.5 bg-status-healthy/10 hover:bg-status-healthy/20 border border-status-healthy/20 text-status-healthy text-[8px] rounded uppercase cursor-pointer transition-all"
+                            >
+                              Resolve
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Detailed anomaly logs list */}
+            <div className="glass-card p-6 rounded border-white/6 text-left">
+              <h3 className="text-xs font-semibold text-white uppercase tracking-widest font-mono mb-4">
+                Chronological Anomaly Log History
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-white/5 font-mono text-[10px] text-neutral-500 uppercase tracking-wider select-none">
+                      <th className="py-2.5">Anomaly Event</th>
+                      <th className="py-2.5">Score Strength</th>
+                      <th className="py-2.5">Confidence Rating</th>
+                      <th className="py-2.5">Detected At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {anomalies.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="text-center py-4 font-mono text-neutral-600">
+                          NO_ANOMALIES_RECORDED
+                        </td>
+                      </tr>
+                    ) : (
+                      anomalies.map((anom) => (
+                        <tr key={anom.id} className="border-b border-white/[0.01]">
+                          <td className="py-3 pr-4">
+                            <div className="flex flex-col space-y-1">
+                              <span className="font-mono text-[10px] font-bold text-white uppercase tracking-wide">
+                                Anomaly on {anom.metric_type.toUpperCase()}
+                              </span>
+                              <span className="font-sans text-[11px] text-neutral-400 leading-relaxed">
+                                {anom.context?.explanation || anom.context?.reason || "High deviation observed in performance trends."}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 w-40 pr-6">
+                            <AnomalyScoreBar score={anom.score} />
+                          </td>
+                          <td className="py-3">
+                            {/* Score maps to confidence scale: standard range 0 to 5, normalized to 0-1 */}
+                            <ConfidenceRing confidence={anom.score / 5.0} size={28} strokeWidth={2} />
+                          </td>
+                          <td className="py-3 font-mono text-neutral-500">
+                            {new Date(anom.detected_at).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
             {/* Alert history table */}
             <div className="glass-card p-6 rounded border-white/6 text-left">
-              <h3 className="text-xs font-semibold text-white uppercase tracking-widest mb-4">
+              <h3 className="text-xs font-semibold text-white uppercase tracking-widest font-mono mb-4">
                 Alert History Logs
               </h3>
               <div className="overflow-x-auto">

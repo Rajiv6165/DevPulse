@@ -27,3 +27,25 @@ def get_db_cursor():
             except Exception as e:
                 conn.rollback()
                 raise e
+
+def init_db():
+    """Initializes database tables like incidents if they don't exist."""
+    print("[Database] Ensuring database tables and indexes exist...")
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS incidents (
+                    id UUID PRIMARY KEY,
+                    root_cause_service_id UUID REFERENCES services(id) ON DELETE CASCADE,
+                    affected_service_ids UUID[] NOT NULL,
+                    started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    resolved_at TIMESTAMP WITH TIME ZONE,
+                    summary TEXT
+                );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_incidents_started_at ON incidents (started_at);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_incidents_resolved_at ON incidents (resolved_at);")
+        print("[Database] Database initialization succeeded.")
+    except Exception as e:
+        print(f"[Database] Error initializing database tables: {e}")
+

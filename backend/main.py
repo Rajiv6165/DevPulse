@@ -4,8 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.config import settings
+from core.database import init_db
 from core.websocket_manager import manager
-from routes import auth, services, metrics, alerts, websocket, analytics
+from routes import auth, services, metrics, alerts, websocket, analytics, incidents
 from workers.anomaly_worker import start_worker, stop_worker
 from ml.trainer import retrain_all_models
 from workers.s3_archiver import run_log_archiver
@@ -37,6 +38,9 @@ async def log_telemetry_status():
 async def lifespan(app: FastAPI):
     # --- Startup Actions ---
     logger.info("Initializing DevPulse Backend...")
+    
+    # Run DB migrations/initialization
+    init_db()
     
     # A. Register health status logging job (every 60s)
     scheduler.add_job(log_telemetry_status, 'interval', seconds=60)
@@ -91,6 +95,8 @@ app.include_router(metrics.router)
 app.include_router(alerts.router)
 app.include_router(websocket.router)
 app.include_router(analytics.router)
+app.include_router(incidents.router)
+
 
 # 7. Health Check Endpoint
 @app.get("/health", tags=["system"])

@@ -27,6 +27,10 @@ export const AlertFeedItem = ({
     textClass = 'text-status-warning'
   }
 
+  const isPredictive = message.includes('predicted') || message.includes('trajectory') || message.includes('⏱️')
+  const match = message.match(/in approximately ([\d\.]+) minutes/)
+  const countdown = match ? match[1] : null
+
   return (
     <motion.div
       initial={{ x: 80, opacity: 0 }}
@@ -40,6 +44,11 @@ export const AlertFeedItem = ({
         <div className="flex items-center space-x-1.5">
           <AlertCircle className={`w-3.5 h-3.5 ${textClass}`} />
           <SeverityBadge severity={severity} />
+          {isPredictive && (
+            <span className="bg-status-warning/15 text-status-warning border border-status-warning/20 text-[8px] font-bold px-1.5 py-0.2 rounded font-mono select-none tracking-wider">
+              ⏱️ BREACH IN ~{countdown || '12'} MIN
+            </span>
+          )}
         </div>
         <span className="text-[9px] text-neutral-500 font-mono">
           {timeAgo.toUpperCase()}
@@ -49,6 +58,7 @@ export const AlertFeedItem = ({
       <p className="text-neutral-200 text-[11px] font-sans font-medium leading-relaxed">
         {message}
       </p>
+
 
       {!is_resolved && (
         <button

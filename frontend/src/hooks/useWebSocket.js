@@ -10,7 +10,9 @@ export const useWebSocket = () => {
   const setWsConnected = useStore((state) => state.setWsConnected);
   const updateTelemetry = useStore((state) => state.updateTelemetry);
   const addAlert = useStore((state) => state.addAlert);
+  const addIncident = useStore((state) => state.addIncident);
   const addLog = useStore((state) => state.addLog);
+  const addToast = useStore((state) => state.addToast);
 
   const connect = useCallback(() => {
     // Clean up existing connections
@@ -46,7 +48,6 @@ export const useWebSocket = () => {
         const { event: eventType, data } = payload;
 
         if (eventType === 'metrics') {
-          // data is a list of latest metrics: [{ id, service_id, metric_type, value, timestamp }, ...]
           if (Array.isArray(data)) {
             data.forEach((metric) => {
               updateTelemetry(
@@ -58,16 +59,40 @@ export const useWebSocket = () => {
             });
           }
         } else if (eventType === 'alert') {
-          // Real-time anomaly alert event
-          // data: { id, service_id, metric_id, severity, message, is_resolved, created_at }
           addAlert(data);
           addLog({
             level: data.severity === 'critical' ? 'ERROR' : 'WARN',
             message: `[Alert Triggered] ${data.message}`,
             timestamp: data.created_at
           });
+          
+          const isPredictive = data.message.includes('predicted') || data.message.includes(' trajectory') || data.message.includes('⏱️');
+          if (isPredictive) {
+            addToast({
+              title: "⏱️ Predictive Warning",
+              message: data.message,
+              type: "predictive"
+            });
+          } else {
+            addToast({
+              title: data.severity === 'critical' ? "🔴 Critical Alert" : "🟡 Warning Alert",
+              message: data.message,
+              type: "anomaly"
+            });
+          }
+        } else if (eventType === 'incident') {
+          addIncident(data);
+          addLog({
+            level: 'ERROR',
+            message: `[Incident Formed] ${data.summary}`,
+            timestamp: data.started_at
+          });
+          addToast({
+            title: "🔗 Incident Grouped",
+            message: data.summary,
+            type: "incident"
+          });
         } else if (eventType === 'log') {
-          // If logs are explicitly pushed over WS
           addLog(data);
         }
       } catch (err) {

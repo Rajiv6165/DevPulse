@@ -61,4 +61,12 @@ def resolve_alert(
             detail="Alert not found or you do not have permission to modify it"
         )
         
+    try:
+        from ml.correlator import IncidentCorrelator
+        correlator = IncidentCorrelator()
+        correlator.resolve_incident_if_all_alerts_resolved(str(resolved_alert["service_id"]))
+    except Exception as e:
+        print(f"[Alerts Route] Error attempting incident auto-resolution: {e}")
+        
     return resolved_alert
+

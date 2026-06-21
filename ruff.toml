@@ -1,0 +1,6 @@
+# Ruff configuration file
+
+[lint]
+# Allow module-level imports not at the top of the file in tests, 
+# which is required to set up mock environments first.
+per-file-ignores = { "backend/tests/*.py" = ["E402"] }

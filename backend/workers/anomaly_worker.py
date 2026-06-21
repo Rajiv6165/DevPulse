@@ -1,11 +1,13 @@
 import asyncio
 import json
-from datetime import datetime
 from core.database import get_db_cursor
 from core.redis import async_redis_client
 from core.websocket_manager import manager
 from core.notifications import dispatch_anomaly_notifications
 from ml.detector import AnomalyDetector
+from ml.forecaster import Forecaster
+from ml.correlator import IncidentCorrelator
+from ml.explainer import Explainer
 
 # Global shared detector instance
 detector = AnomalyDetector()
@@ -52,15 +54,69 @@ async def process_metric_message(msg_id: str, payload: dict):
         # 1. Detect Anomaly using the ML AnomalyDetector orchestrator
         res = await detector.detect(service_id, metric_type, value)
         
-        # 2. Check if anomaly was flagged
+        # 2. Get history from Redis and run Predictive Forecaster
+        history = await detector.zscore_detector.get_timestamped_window(service_id, metric_type)
+        forecaster = Forecaster()
+        fc_res = forecaster.forecast(metric_type, history)
+        
+        # 3. Check for Predictive Alert
+        if fc_res and fc_res.get("breached"):
+            # Generate predictive explanation
+            pred_explanation = Explainer.generate_explanation(metric_type, value, res, fc_res)
+            print(f"[Worker] Predictive Alert! Service: {service_id}, Metric: {metric_type}, Explanation: {pred_explanation}")
+            
+            # A. Insert predictive alert to DB
+            with get_db_cursor() as cur:
+                cur.execute(
+                    "INSERT INTO alerts (service_id, metric_id, severity, message, is_resolved, created_at) "
+                    "VALUES (%s, %s, %s, %s, FALSE, NOW()) "
+                    "RETURNING id, service_id, metric_id, severity, message, is_resolved, created_at",
+                    (service_id, metric_id, "medium", pred_explanation)
+                )
+                pred_alert = cur.fetchone()
+            
+            # B. Broadcast alert in real-time to active WebSocket client connections
+            with get_db_cursor() as cur:
+                cur.execute("SELECT owner_id FROM services WHERE id = %s", (service_id,))
+                service_record = cur.fetchone()
+                
+            if service_record:
+                owner_id = str(service_record["owner_id"])
+                alert_payload = {
+                    "id": str(pred_alert["id"]),
+                    "service_id": str(pred_alert["service_id"]),
+                    "metric_id": str(pred_alert["metric_id"]) if pred_alert["metric_id"] else None,
+                    "severity": pred_alert["severity"],
+                    "message": pred_alert["message"],
+                    "is_resolved": pred_alert["is_resolved"],
+                    "created_at": pred_alert["created_at"].isoformat()
+                }
+                await manager.broadcast_alert(owner_id, alert_payload)
+
+            # C. Dispatch notifications with cooldown (5-min rate limit handled in notifications)
+            asyncio.create_task(
+                dispatch_anomaly_notifications(
+                    service_id=service_id,
+                    metric_type=metric_type,
+                    value=value,
+                    severity="medium",
+                    timestamp=pred_alert["created_at"],
+                    explanation=pred_explanation,
+                    predictive_context=fc_res
+                )
+            )
+
+        # 4. Check if anomaly was flagged
         if res.is_anomaly:
-            print(f"[Worker] Anomaly detected! Service: {service_id}, Metric: {metric_type}, Value: {value}, Score: {res.score:.2f}, Method: {res.method}, Severity: {res.severity}")
+            print(f"[Worker] Anomaly detected! Service: {service_id}, Metric: {metric_type}, Value: {value}, Confidence: {res.confidence:.2f}")
             
             # A. Insert anomaly record to DB
             context_data = {
                 "value": value,
-                "method": res.method,
+                "confidence": res.confidence,
                 "severity": res.severity,
+                "contributing_methods": res.contributing_methods,
+                "explanation": res.explanation,
                 "metric_id": metric_id,
                 **res.metadata
             }
@@ -70,26 +126,29 @@ async def process_metric_message(msg_id: str, payload: dict):
                     "INSERT INTO anomalies (service_id, metric_type, score, detected_at, context) "
                     "VALUES (%s, %s, %s, NOW(), %s::jsonb) "
                     "RETURNING id, service_id, metric_type, score, detected_at, context",
-                    (service_id, metric_type, res.score, json.dumps(context_data))
+                    (service_id, metric_type, res.confidence, json.dumps(context_data))
                 )
                 anomaly = cur.fetchone()
                 
-            # B. Insert alert record to DB
-            message = (
-                f"Anomaly detected in {metric_type} using {res.method}: "
-                f"Value {value:.2f} is outlying ({res.severity.upper()} severity, Score: {res.score:.2f})"
-            )
+            # B. Incident correlation
+            correlator = IncidentCorrelator()
+            incident = correlator.correlate_anomaly(service_id, metric_type, anomaly["detected_at"])
             
+            # C. Insert alert record to DB
+            alert_message = res.explanation
+            if incident:
+                alert_message += f" [Part of Incident: {incident['summary']}]"
+                
             with get_db_cursor() as cur:
                 cur.execute(
                     "INSERT INTO alerts (service_id, metric_id, severity, message, is_resolved, created_at) "
                     "VALUES (%s, %s, %s, %s, FALSE, NOW()) "
-                    "RETURNING id, service_id, metric_id, severity, message, is_resolved, created_at, resolved_at",
-                    (service_id, metric_id, res.severity, message)
+                    "RETURNING id, service_id, metric_id, severity, message, is_resolved, created_at",
+                    (service_id, metric_id, res.severity, alert_message)
                 )
                 alert = cur.fetchone()
                 
-            # C. Broadcast alert in real-time to active WebSocket client connections
+            # D. Broadcast alert in real-time to active WebSocket client connections
             with get_db_cursor() as cur:
                 cur.execute("SELECT owner_id FROM services WHERE id = %s", (service_id,))
                 service_record = cur.fetchone()
@@ -105,22 +164,22 @@ async def process_metric_message(msg_id: str, payload: dict):
                     "is_resolved": alert["is_resolved"],
                     "created_at": alert["created_at"].isoformat()
                 }
-                # Pushes to WebSocket clients in-memory
                 await manager.broadcast_alert(owner_id, alert_payload)
 
-            # D. Dispatch notifications (Slack + Resend Email) with built-in 5-min cooldown rate-limiting
-            # Run this in a task to prevent blocking the main consumer loop
+            # E. Dispatch notifications
             asyncio.create_task(
                 dispatch_anomaly_notifications(
-                    service_id, 
-                    metric_type, 
-                    value, 
-                    res.severity, 
-                    alert["created_at"]
+                    service_id=service_id,
+                    metric_type=metric_type,
+                    value=value,
+                    severity=res.severity,
+                    timestamp=alert["created_at"],
+                    explanation=res.explanation,
+                    incident_context=incident
                 )
             )
 
-        # 3. Acknowledge processed stream item
+        # 5. Acknowledge processed stream item
         await async_redis_client.xack("devpulse:metrics:stream", "anomaly-workers", msg_id)
 
     except Exception as e:

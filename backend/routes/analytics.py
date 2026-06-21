@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
@@ -113,3 +113,84 @@ def get_service_summary(
         anomaly_count=anomaly_count,
         health_score=health_score
     )
+
+@router.get("/{service_id}/forecast")
+async def get_service_forecast(
+    service_id: UUID,
+    metric_type: str = Query(default="cpu"),
+    current_user_id: str = Depends(get_current_user_id)
+):
+    """Generates next 15-minute forecast curve for a metric type."""
+    import time
+    from datetime import datetime, timezone
+    from ml.zscore import ZScoreDetector
+    from ml.forecaster import Forecaster
+
+    service_id_str = str(service_id)
+    
+    # 1. Enforce service ownership check
+    with get_db_cursor() as cur:
+        cur.execute(
+            "SELECT id FROM services WHERE id = %s AND owner_id = %s AND is_active = TRUE",
+            (service_id_str, current_user_id)
+        )
+        service = cur.fetchone()
+    if not service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Monitored service not found or access denied"
+        )
+
+    # 2. Get history from Redis
+    zscore_detector = ZScoreDetector()
+    history = await zscore_detector.get_timestamped_window(service_id_str, metric_type)
+    
+    # Fallback to Supabase if Redis window is empty or too short
+    if len(history) < 5:
+        with get_db_cursor() as cur:
+            cur.execute(
+                "SELECT timestamp, value FROM metrics "
+                "WHERE service_id = %s AND metric_type = %s "
+                "ORDER BY timestamp DESC LIMIT 100",
+                (service_id_str, metric_type)
+            )
+            rows = cur.fetchall()
+        history = [{"t": row["timestamp"].timestamp(), "v": float(row["value"])} for row in rows]
+        history.reverse()
+
+    if not history:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Not enough historical data to generate forecast for {metric_type}"
+        )
+
+    # 3. Fit linear regression and predict
+    forecaster = Forecaster()
+    slope, intercept = forecaster._fit_linear_regression(history)
+    
+    current_time = time.time()
+    forecast_points = []
+    
+    for offset_min in range(0, 16):
+        t = current_time + (offset_min * 60.0)
+        pred_val = (slope * t) + intercept
+        
+        # Clamping logic for logical metrics
+        if metric_type in ["cpu", "memory", "error_rate"]:
+            pred_val = max(0.0, min(100.0, pred_val))
+        else:
+            pred_val = max(0.0, pred_val)
+            
+        forecast_points.append({
+            "timestamp": datetime.fromtimestamp(t, timezone.utc).isoformat(),
+            "value": round(pred_val, 2)
+        })
+
+    return {
+        "service_id": service_id,
+        "metric_type": metric_type,
+        "forecast": forecast_points,
+        "slope": slope,
+        "intercept": intercept
+    }
+

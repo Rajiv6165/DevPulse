@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Services from './pages/Services'
 import ServiceDetail from './pages/ServiceDetail'
 import Alerts from './pages/Alerts'
+import Incidents from './pages/Incidents'
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/services" element={<Services />} />
         <Route path="/services/:id" element={<ServiceDetail />} />
+        <Route path="/incidents" element={<Incidents />} />
         <Route path="/alerts" element={<Alerts />} />
 
         {/* Default fallback route */}

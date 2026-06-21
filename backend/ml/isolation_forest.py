@@ -1,12 +1,12 @@
 import base64
 import pickle
-from typing import Tuple, Optional
+from typing import Tuple
 from core.redis import async_redis_client
 
 # Graceful imports to accommodate environment constraints
 try:
     import numpy as np
-    from sklearn.ensemble import IsolationForest
+    from sklearn.ensemble import IsolationForest  # noqa: F401
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False

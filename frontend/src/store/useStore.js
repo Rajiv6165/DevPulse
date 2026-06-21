@@ -86,8 +86,25 @@ export const useStore = create((set, get) => ({
   // --- ALERTS & ANOMALIES FEED ---
   alerts: [],
   anomalies: [],
+  incidents: [],
   setAlerts: (alerts) => set({ alerts }),
   setAnomalies: (anomalies) => set({ anomalies }),
+  setIncidents: (incidents) => set({ incidents }),
+  
+  addIncident: (incident) => {
+    set((state) => {
+      if (state.incidents.some(i => i.id === incident.id)) return {}
+      return { incidents: [incident, ...state.incidents] }
+    })
+  },
+  
+  resolveIncidentOptimistic: (incidentId) => {
+    set((state) => ({
+      incidents: state.incidents.map(i =>
+        i.id === incidentId ? { ...i, resolved_at: new Date().toISOString() } : i
+      )
+    }))
+  },
   
   addAlert: (alert) => {
     set((state) => {
@@ -149,6 +166,17 @@ export const useStore = create((set, get) => ({
   
   soundEnabled: true,
   toggleSound: () => set((state) => ({ soundEnabled: !state.soundEnabled })),
+  
+  toasts: [],
+  addToast: (toast) => {
+    const id = Math.random().toString(36).substr(2, 9)
+    set((state) => ({ toasts: [...state.toasts, { ...toast, id }] }))
+    setTimeout(() => {
+      set((state) => ({ toasts: state.toasts.filter(t => t.id !== id) }))
+    }, 5000)
+  },
+  removeToast: (id) => set((state) => ({ toasts: state.toasts.filter(t => t.id !== id) })),
+
 
   // --- DEMO MOCK METRIC INJECTOR ---
   // Runs automatically to showcase breathing animations and charts when WS is disconnected
@@ -205,19 +233,34 @@ export const useStore = create((set, get) => ({
       { level: 'DEBUG', message: `[${randomService}] Cleaned idle connection pool channels.` },
     ]
     
-    const isError = Math.random() < 0.03
+    const isError = Math.random() < 0.05
     if (isError) {
       get().addLog({ level: 'ERROR', message: `[${randomService}] Error: Failed connection handshake to Redis client!` })
       // Spawn mock alert
       const alertId = `mock-alert-${Math.random().toString(36).substr(2, 9)}`
       const randomServiceId = services[Math.floor(Math.random() * services.length)].id
+      const actualMessage = `CPU usage hit 94%, which is 3.2x higher than typical 29% seen at this hour. This pattern matches sudden spike.`
+      
       get().addAlert({
         id: alertId,
         service_id: randomServiceId,
         severity: Math.random() < 0.3 ? 'critical' : 'medium',
-        message: `High connection error rates detected on ${randomService}!`,
+        message: actualMessage,
         is_resolved: false,
         created_at: new Date().toISOString()
+      })
+      
+      // Spawn mock incident
+      const incidentId = `mock-inc-${Math.random().toString(36).substr(2, 9)}`
+      const affectedService = services[Math.floor(Math.random() * services.length)]
+      get().addIncident({
+        id: incidentId,
+        root_cause_service_id: randomServiceId,
+        root_cause_service_name: randomService,
+        affected_service_ids: [affectedService.id],
+        started_at: new Date().toISOString(),
+        resolved_at: null,
+        summary: `Grouped incident: ${randomService} degraded. Downstream impact detected on ${affectedService.name}.`
       })
     } else {
       get().addLog(logOptions[Math.floor(Math.random() * logOptions.length)])

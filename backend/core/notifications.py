@@ -2,7 +2,7 @@ import asyncio
 import httpx
 import resend
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from core.config import settings
 from core.database import get_db_cursor
 from core.redis import async_redis_client
@@ -69,8 +69,17 @@ async def get_alert_context(service_id: str, metric_type: str) -> Dict[str, Any]
         
     return context
 
-async def send_slack_alert(service_name: str, metric_type: str, value: float, severity: str, timestamp: datetime):
-    """Sends a rich Slack Block Kit notification for the anomaly."""
+async def send_slack_alert(
+    service_name: str, 
+    metric_type: str, 
+    value: float, 
+    severity: str, 
+    timestamp: datetime,
+    explanation: str,
+    incident_context: Optional[Dict[str, Any]] = None,
+    predictive_context: Optional[Dict[str, Any]] = None
+):
+    """Sends a rich Slack Block Kit notification containing explanations, trends, and incident grouping."""
     if not settings.SLACK_WEBHOOK_URL:
         print("[Slack] Webhook URL not configured. Slack alert skipped.")
         return
@@ -81,42 +90,80 @@ async def send_slack_alert(service_name: str, metric_type: str, value: float, se
     elif severity == "medium":
         emoji = "🟡"
         
-    payload = {
-        "blocks": [
+    is_predictive = bool(predictive_context and predictive_context.get("breached"))
+    header_text = f"{emoji} DevPulse Predictive Warning" if is_predictive else f"{emoji} DevPulse Alert: Anomaly Detected"
+    
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": header_text,
+                "emoji": True
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*Explanation:*\n{explanation}"
+            }
+        }
+    ]
+
+    # Add predictive information if applicable
+    if is_predictive:
+        minutes = predictive_context.get("predicted_breach_in_minutes", 0.0)
+        blocks.append({
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"⏱️ *Predicted to breach threshold in ~{minutes:.1f} minutes*"
+                }
+            ]
+        })
+
+    # Add incident context if available
+    if incident_context:
+        summary = incident_context.get("summary", "")
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"🚨 *Part of Grouped Incident:*\n{summary}"
+            }
+        })
+
+    # Add metadata fields
+    blocks.append({
+        "type": "section",
+        "fields": [
+            {"type": "mrkdwn", "text": f"*Service:* {service_name}"},
+            {"type": "mrkdwn", "text": f"*Metric Type:* {metric_type}"},
+            {"type": "mrkdwn", "text": f"*Value:* {value:.2f}"},
+            {"type": "mrkdwn", "text": f"*Severity:* {severity.upper()}"},
+            {"type": "mrkdwn", "text": f"*Detected At:* {timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"}
+        ]
+    })
+
+    # Add action button
+    blocks.append({
+        "type": "actions",
+        "elements": [
             {
-                "type": "header",
+                "type": "button",
                 "text": {
                     "type": "plain_text",
-                    "text": f"{emoji} DevPulse Alert: Anomaly Detected",
-                    "emoji": True
-                }
-            },
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Service:* {service_name}"},
-                    {"type": "mrkdwn", "text": f"*Metric Type:* {metric_type}"},
-                    {"type": "mrkdwn", "text": f"*Value:* {value:.2f}"},
-                    {"type": "mrkdwn", "text": f"*Severity:* {severity.upper()}"},
-                    {"type": "mrkdwn", "text": f"*Detected At:* {timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"}
-                ]
-            },
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "View Dashboard"
-                        },
-                        "url": "http://localhost:3000",
-                        "style": "primary"
-                      }
-                ]
+                    "text": "View Dashboard"
+                },
+                "url": "http://localhost:3000",
+                "style": "primary"
             }
         ]
-    }
+    })
+    
+    payload = {"blocks": blocks}
     
     try:
         async with httpx.AsyncClient() as client:
@@ -135,9 +182,12 @@ async def send_email_alert(
     value: float, 
     severity: str, 
     timestamp: datetime, 
-    recent_metrics: List[Dict[str, Any]]
+    recent_metrics: List[Dict[str, Any]],
+    explanation: str,
+    incident_context: Optional[Dict[str, Any]] = None,
+    predictive_context: Optional[Dict[str, Any]] = None
 ):
-    """Sends a formatted HTML email alert using Resend API."""
+    """Sends a formatted HTML email alert card using Resend API."""
     if not settings.RESEND_API_KEY:
         print("[Resend] Resend API key not configured. Email alert skipped.")
         return
@@ -149,53 +199,84 @@ async def send_email_alert(
         f"</tr>"
         for m in recent_metrics
     )
+
+    is_predictive = bool(predictive_context and predictive_context.get("breached"))
+    subject_title = "Predictive Warning" if is_predictive else "Anomaly Warning"
+    
+    # Conditional components for HTML email card
+    predictive_html = ""
+    if is_predictive:
+        minutes = predictive_context.get("predicted_breach_in_minutes", 0.0)
+        predictive_html = f"""
+        <div style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+            <strong>⏱️ Forecast Alert:</strong> Predicted to breach threshold in ~{minutes:.1f} minutes.
+        </div>
+        """
+
+    incident_html = ""
+    if incident_context:
+        summary = incident_context.get("summary", "")
+        incident_html = f"""
+        <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+            <strong>🚨 Grouped Incident:</strong> {summary}
+        </div>
+        """
     
     html_content = f"""
     <html>
-        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
-            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; max-width: 600px; margin: 0 auto; border: 1px solid #e9ecef;">
-                <h2 style="color: #dc3545; margin-top: 0;">⚠️ DevPulse Anomaly Warning</h2>
-                <p>An anomalous reading has been detected in your monitored service:</p>
+        <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6;">
+            <div style="background-color: #ffffff; padding: 25px; border-radius: 12px; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                <div style="border-bottom: 2px solid #eaecef; padding-bottom: 15px; margin-bottom: 20px;">
+                    <h2 style="color: #dc3545; margin: 0; font-size: 22px;">⚠️ DevPulse {subject_title}</h2>
+                </div>
                 
-                <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                {predictive_html}
+                {incident_html}
+
+                <div style="background-color: #f8f9fa; border-left: 4px solid #007bff; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                    <strong style="color: #495057; display: block; margin-bottom: 5px;">Description:</strong>
+                    <p style="margin: 0; font-size: 15px; color: #212529;">{explanation}</p>
+                </div>
+                
+                <table style="border-collapse: collapse; width: 100%; margin-bottom: 25px;">
                     <tr style="background-color: #f1f3f5;">
-                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left;">Field</th>
-                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left;">Value</th>
+                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left; font-size: 14px;">Field</th>
+                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left; font-size: 14px;">Value</th>
                     </tr>
                     <tr>
-                        <td style="border: 1px solid #dee2e6; padding: 10px;">Service Name</td>
-                        <td style="border: 1px solid #dee2e6; padding: 10px; font-weight: bold;">{service_name}</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; font-size: 14px;">Service Name</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; font-weight: bold; font-size: 14px;">{service_name}</td>
                     </tr>
                     <tr>
-                        <td style="border: 1px solid #dee2e6; padding: 10px;">Metric Type</td>
-                        <td style="border: 1px solid #dee2e6; padding: 10px;">{metric_type}</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; font-size: 14px;">Metric Type</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; text-transform: capitalize; font-size: 14px;">{metric_type}</td>
                     </tr>
                     <tr>
-                        <td style="border: 1px solid #dee2e6; padding: 10px;">Trigger Value</td>
-                        <td style="border: 1px solid #dee2e6; padding: 10px; color: #dc3545; font-weight: bold;">{value:.2f}</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; font-size: 14px;">Trigger Value</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; color: #dc3545; font-weight: bold; font-size: 14px;">{value:.2f}</td>
                     </tr>
                     <tr>
-                        <td style="border: 1px solid #dee2e6; padding: 10px;">Severity</td>
-                        <td style="border: 1px solid #dee2e6; padding: 10px; text-transform: uppercase; font-weight: bold; color: #ffc107;">{severity}</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; font-size: 14px;">Severity</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; text-transform: uppercase; font-weight: bold; color: {'#dc3545' if severity=='critical' else '#ffc107' if severity=='medium' else '#28a745'}; font-size: 14px;">{severity}</td>
                     </tr>
                     <tr>
-                        <td style="border: 1px solid #dee2e6; padding: 10px;">Detected At</td>
-                        <td style="border: 1px solid #dee2e6; padding: 10px;">{timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; font-size: 14px;">Detected At</td>
+                        <td style="border: 1px solid #dee2e6; padding: 10px; font-size: 14px;">{timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}</td>
                     </tr>
                 </table>
                 
-                <h3 style="color: #495057;">Recent Metrics Table</h3>
-                <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <h3 style="color: #495057; font-size: 16px; margin-bottom: 10px;">Recent Metric History</h3>
+                <table style="border-collapse: collapse; width: 100%; margin-bottom: 25px;">
                     <tr style="background-color: #f1f3f5;">
-                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left;">Timestamp</th>
-                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left;">Value</th>
+                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left; font-size: 13px;">Timestamp</th>
+                        <th style="border: 1px solid #dee2e6; padding: 10px; text-align: left; font-size: 13px;">Value</th>
                     </tr>
                     {table_rows}
                 </table>
                 
-                <p style="text-align: center; margin-top: 30px;">
-                    <a href="http://localhost:3000" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">View Dashboard Panel</a>
-                </p>
+                <div style="text-align: center; margin-top: 30px; border-top: 1px solid #eaecef; padding-top: 20px;">
+                    <a href="http://localhost:3000" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; font-size: 14px;">View Dashboard Panel</a>
+                </div>
             </div>
         </body>
     </html>
@@ -206,14 +287,23 @@ async def send_email_alert(
         await loop.run_in_executor(None, lambda: resend.Emails.send({
             "from": settings.RESEND_SENDER_EMAIL,
             "to": owner_email,
-            "subject": f"[DevPulse] {severity.upper()} Alert: Anomaly in {service_name}",
+            "subject": f"[DevPulse] {severity.upper()} {subject_title}: {service_name}",
             "html": html_content
         }))
         print(f"[Resend] Email alert sent to {owner_email} for service {service_name}")
     except Exception as e:
         print(f"[Resend] Exception sending email: {e}")
 
-async def dispatch_anomaly_notifications(service_id: str, metric_type: str, value: float, severity: str, timestamp: datetime):
+async def dispatch_anomaly_notifications(
+    service_id: str, 
+    metric_type: str, 
+    value: float, 
+    severity: str, 
+    timestamp: datetime,
+    explanation: str,
+    incident_context: Optional[Dict[str, Any]] = None,
+    predictive_context: Optional[Dict[str, Any]] = None
+):
     """
     Orchestrates checking notification rate-limits and spawning
     Slack webhook triggers and Resend email alerts.
@@ -221,7 +311,7 @@ async def dispatch_anomaly_notifications(service_id: str, metric_type: str, valu
     # 1. Verify notification cooldown limit (5 minutes)
     in_cooldown = await check_cooldown(service_id, metric_type)
     if in_cooldown:
-        print(f"[Notifications] Cooldown active for {service_id}:{metric_type}. Alert dispatch skipped.")
+        print(f"[Notifications] Cooldown active for {service_id}:{metric_type}. Alert dispatch suppressed.")
         return
 
     # 2. Gather service details and history
@@ -229,7 +319,27 @@ async def dispatch_anomaly_notifications(service_id: str, metric_type: str, valu
     
     # 3. Spawn notifications asynchronously
     await asyncio.gather(
-        send_slack_alert(ctx["service_name"], metric_type, value, severity, timestamp),
-        send_email_alert(ctx["owner_email"], ctx["service_name"], metric_type, value, severity, timestamp, ctx["recent_metrics"]),
+        send_slack_alert(
+            ctx["service_name"], 
+            metric_type, 
+            value, 
+            severity, 
+            timestamp,
+            explanation,
+            incident_context,
+            predictive_context
+        ),
+        send_email_alert(
+            ctx["owner_email"], 
+            ctx["service_name"], 
+            metric_type, 
+            value, 
+            severity, 
+            timestamp, 
+            ctx["recent_metrics"],
+            explanation,
+            incident_context,
+            predictive_context
+        ),
         return_exceptions=True
     )

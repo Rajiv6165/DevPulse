@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Bell, LogOut, ShieldAlert, Cpu, Activity, Clock, ShieldCheck, Heart } from 'lucide-react'
+import { Bell, LogOut, ShieldAlert, Cpu, Activity, Clock, ShieldCheck, Heart, AlertOctagon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore'
 import { useWebSocket } from '../hooks/useWebSocket'
@@ -11,8 +11,8 @@ import MetricChart from '../components/MetricChart'
 import ServiceHealthCard from '../components/ServiceHealthCard'
 import AlertFeedItem from '../components/AlertFeedItem'
 import LiveTerminal from '../components/LiveTerminal'
-import AnomalyScoreBar from '../components/AnomalyScoreBar'
 import SeverityBadge from '../components/SeverityBadge'
+import IncidentCard from '../components/IncidentCard'
 
 export const Dashboard = () => {
   const navigate = useNavigate()
@@ -29,13 +29,18 @@ export const Dashboard = () => {
   const latestMetrics = useStore((state) => state.latestMetrics)
   const alerts = useStore((state) => state.alerts)
   const setAlerts = useStore((state) => state.setAlerts)
+  const incidents = useStore((state) => state.incidents)
+  const setIncidents = useStore((state) => state.setIncidents)
+  const toasts = useStore((state) => state.toasts)
+  const removeToast = useStore((state) => state.removeToast)
   const resolveAlertOptimistic = useStore((state) => state.resolveAlertOptimistic)
   const wsConnected = useStore((state) => state.wsConnected)
   const generateMockTelemetry = useStore((state) => state.generateMockTelemetry)
   
-  // Local state for active chart tab
+  // Local state for active chart tab and forecast data
   const [activeMetricTab, setActiveMetricTab] = useState('cpu')
   const [showBellDropdown, setShowBellDropdown] = useState(false)
+  const [forecastData, setForecastData] = useState([])
 
   // Redirect to login if unauthenticated
   useEffect(() => {
@@ -48,7 +53,6 @@ export const Dashboard = () => {
   useEffect(() => {
     let interval
     if (!wsConnected) {
-      // Seed first tick immediately
       generateMockTelemetry()
       interval = setInterval(() => {
         generateMockTelemetry()
@@ -83,11 +87,74 @@ export const Dashboard = () => {
           setAlerts(data)
         }
       }).catch(err => console.warn('Could not load alerts from backend:', err))
+
+      // Load active incidents
+      fetch('/api/incidents/?active=true', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setIncidents(data)
+        }
+      }).catch(err => console.warn('Could not load incidents from backend:', err))
     }
-  }, [token, setAlerts])
+  }, [token, setAlerts, setIncidents])
+
+  // Format historical metrics for charts based on current service filter
+  const getChartData = () => {
+    if (currentServiceId === 'all') {
+      const serviceIds = Object.keys(historicalMetrics)
+      if (serviceIds.length === 0) return []
+      return historicalMetrics[serviceIds[0]]?.[activeMetricTab] || []
+    }
+    return historicalMetrics[currentServiceId]?.[activeMetricTab] || []
+  }
+
+  const chartData = getChartData()
+
+  // Fetch forecast telemetry
+  useEffect(() => {
+    if (token && token !== 'demo_jwt_token_key_devpulse') {
+      const serviceId = currentServiceId === 'all'
+        ? (services.length > 0 ? services[0].id : null)
+        : currentServiceId
+
+      if (serviceId) {
+        fetch(`/api/analytics/${serviceId}/forecast?metric_type=${activeMetricTab}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data && Array.isArray(data.forecast)) {
+            setForecastData(data.forecast)
+          } else {
+            setForecastData([])
+          }
+        })
+        .catch(err => {
+          console.warn('Could not load forecast from backend:', err)
+          setForecastData([])
+        })
+      } else {
+        setForecastData([])
+      }
+    } else {
+      // Mock forecast telemetry for demo mode
+      const mockForecast = []
+      const now = Date.now()
+      const lastValue = chartData.length > 0 ? chartData[chartData.length - 1].value : 50
+      for (let i = 1; i <= 15; i++) {
+        mockForecast.push({
+          timestamp: new Date(now + i * 60000).toISOString(),
+          value: lastValue + (Math.random() - 0.4) * 10
+        })
+      }
+      setForecastData(mockForecast)
+    }
+  }, [token, currentServiceId, activeMetricTab, services, chartData])
 
   const handleResolveAlert = async (id) => {
-    // Optimistic UI updates
     resolveAlertOptimistic(id)
     
     if (token && token !== 'demo_jwt_token_key_devpulse') {
@@ -99,17 +166,16 @@ export const Dashboard = () => {
         if (!res.ok) throw new Error('API rejection')
       } catch (err) {
         console.error('Failed to resolve alert on backend:', err)
-        // Note: For full production-grade, we would implement rollbacks in store,
-        // but optimistic update is already handled in state.
       }
     }
   }
 
   // --- DERIVE KPI STATS ---
   const activeServicesCount = services.filter(s => s.is_active).length
+  const activeIncidents = incidents.filter(i => !i.resolved_at)
+  const activeIncidentsCount = activeIncidents.length
   const unresolvedAlertsCount = alerts.filter(a => !a.is_resolved).length
   
-  // Calculate average response time across selected service(s)
   const getAvgResponseTime = () => {
     const list = []
     if (currentServiceId === 'all') {
@@ -123,9 +189,7 @@ export const Dashboard = () => {
     return Math.round(list.reduce((a, b) => a + b, 0) / list.length)
   }
 
-  // Calculate health score dynamically
   const getHealthScore = () => {
-    // Healthy = 100, deduct 15 points per critical alert, 5 per medium
     let score = 100
     const activeAlerts = currentServiceId === 'all' 
       ? alerts.filter(a => !a.is_resolved)
@@ -141,48 +205,39 @@ export const Dashboard = () => {
   const systemHealth = getHealthScore()
   const avgResponseTime = getAvgResponseTime()
 
-  // Format historical metrics for charts based on current service filter
-  const getChartData = () => {
-    if (currentServiceId === 'all') {
-      // Merge values across all services
-      const serviceIds = Object.keys(historicalMetrics)
-      if (serviceIds.length === 0) return []
-      // Use first available service history as layout representative
-      return historicalMetrics[serviceIds[0]]?.[activeMetricTab] || []
-    }
-    return historicalMetrics[currentServiceId]?.[activeMetricTab] || []
-  }
-
-  const chartData = getChartData()
-
-  // List recent anomalies
-  const getRecentAnomalies = () => {
-    // Generate simulated anomalies from logs or query them
-    // Let's filter alerts that represent anomaly alerts
-    const list = alerts.filter(a => a.message.toLowerCase().includes('anomaly'))
-    if (list.length > 0) return list.slice(0, 5)
-    
-    // Fallback static list for demo aesthetics
-    return [
-      { id: 'anom-1', service_name: 'api-gateway', metric_type: 'response_time', score: 3.85, severity: 'medium', created_at: new Date(Date.now() - 5 * 60000).toISOString() },
-      { id: 'anom-2', service_name: 'auth-service', metric_type: 'cpu', score: 4.88, severity: 'critical', created_at: new Date(Date.now() - 25 * 60000).toISOString() }
-    ]
-  }
-
-  const anomaliesList = getRecentAnomalies()
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="min-h-screen flex flex-col p-4 md:p-6 space-y-6"
+      className="min-h-screen flex flex-col p-4 md:p-6 space-y-6 select-none relative"
     >
       
+      {/* Real-time Toast Notifications Container Overlay */}
+      <div className="fixed top-6 right-6 z-50 flex flex-col space-y-2 max-w-sm pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, y: -20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
+              className="pointer-events-auto bg-[#0A0A0A]/95 border border-white/8 p-4 rounded-lg shadow-2xl backdrop-blur-sm flex flex-col space-y-1 text-left relative overflow-hidden"
+              style={{ borderLeft: t.type === 'predictive' ? '4px solid #A78BFA' : t.type === 'incident' ? '4px solid #F43F5E' : '4px solid #00F5FF' }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs font-bold text-white uppercase">{t.title}</span>
+                <button onClick={() => removeToast(t.id)} className="text-neutral-500 hover:text-white font-mono text-[9px] cursor-pointer">✕</button>
+              </div>
+              <p className="text-neutral-300 text-[11px] font-sans font-medium leading-relaxed">{t.message}</p>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
       {/* 1. TOP NAVBAR */}
       <nav className="glass-card rounded px-4 py-3 flex items-center justify-between border-white/6 select-none shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
-        {/* Brand Logo */}
         <div className="flex items-center space-x-3 cursor-pointer" onClick={() => navigate('/dashboard')}>
           <div className="w-8 h-8 bg-accent-cyan/10 border border-accent-cyan/20 rounded flex items-center justify-center">
             <Activity className="w-4 h-4 text-accent-cyan" />
@@ -192,7 +247,6 @@ export const Dashboard = () => {
           </span>
         </div>
 
-        {/* Navigation Actions */}
         <div className="flex items-center space-x-4">
           <ServiceSelector />
           <ConnectionStatus />
@@ -211,7 +265,6 @@ export const Dashboard = () => {
               )}
             </button>
 
-            {/* Bell Dropdown Panel */}
             <AnimatePresence>
               {showBellDropdown && (
                 <motion.div 
@@ -243,13 +296,19 @@ export const Dashboard = () => {
             </AnimatePresence>
           </div>
 
-          {/* Nav Page Controls */}
-          <div className="flex items-center space-x-2 border-l border-white/6 pl-4">
+          {/* Navigation links */}
+          <div className="flex items-center space-x-2 border-l border-white/6 pl-4 font-mono">
             <button 
               onClick={() => navigate('/services')} 
               className="text-xs font-mono font-semibold text-neutral-400 hover:text-white transition-all tracking-wider uppercase cursor-pointer"
             >
               Services
+            </button>
+            <button 
+              onClick={() => navigate('/incidents')} 
+              className="text-xs font-mono font-semibold text-neutral-400 hover:text-white transition-all tracking-wider uppercase ml-3 cursor-pointer"
+            >
+              Incidents
             </button>
             <button 
               onClick={() => navigate('/alerts')} 
@@ -259,7 +318,6 @@ export const Dashboard = () => {
             </button>
           </div>
 
-          {/* User Signout */}
           <button 
             onClick={logout} 
             className="p-1.5 bg-status-critical/10 border border-status-critical/15 hover:bg-status-critical/20 text-status-critical rounded transition-all cursor-pointer"
@@ -270,7 +328,7 @@ export const Dashboard = () => {
         </div>
       </nav>
 
-      {/* 2. STATS BAR (4 KPI Cards) */}
+      {/* 2. STATS BAR */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard 
           title="Active Services" 
@@ -280,10 +338,10 @@ export const Dashboard = () => {
           unit=""
         />
         <KPICard 
-          title="Alerts Today" 
-          value={unresolvedAlertsCount} 
-          change={unresolvedAlertsCount > 0 ? "+100" : "0.0"} 
-          isPositive={unresolvedAlertsCount === 0} 
+          title="Active Incidents" 
+          value={activeIncidentsCount} 
+          change={activeIncidentsCount > 0 ? `+${activeIncidentsCount}` : "0.0"} 
+          isPositive={activeIncidentsCount === 0} 
           unit=""
         />
         <KPICard 
@@ -302,26 +360,24 @@ export const Dashboard = () => {
         />
       </div>
 
-      {/* 3. MAIN OBSERVABILITY GRID (12-column) */}
+      {/* 3. MAIN GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
-        {/* LEFT PANEL (8 cols) */}
+        {/* LEFT PANEL */}
         <div className="lg:col-span-8 flex flex-col space-y-6">
           
-          {/* Live Tabbed Charts Panel */}
+          {/* Live Charts */}
           <div className="glass-card p-4.5 rounded border-white/6 flex flex-col justify-between h-[360px]">
-            {/* Tabs Header */}
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2 border-b border-white/5 pb-3 text-left">
               <div className="flex flex-col space-y-0.5">
                 <h2 className="text-sm font-semibold text-white uppercase tracking-widest">
                   Live System Telemetry
                 </h2>
                 <p className="text-[9px] text-neutral-500 font-mono tracking-wider">
-                  REALTIME_PERFORMANCE_ANALYTICS
+                  REALTIME_PERFORMANCE_ANALYTICS_WITH_15M_FORECAST
                 </p>
               </div>
 
-              {/* Chart tabs */}
               <div className="flex items-center space-x-1.5 bg-white/3 border border-white/6 rounded p-1 text-[10px] font-mono">
                 {['cpu', 'memory', 'error_rate', 'response_time'].map((tab) => (
                   <button
@@ -339,10 +395,10 @@ export const Dashboard = () => {
               </div>
             </div>
 
-            {/* Injected Recharts Metric Chart */}
             <div className="flex-1 min-h-[250px]">
               <MetricChart 
                 data={chartData} 
+                forecastData={forecastData}
                 title={`${activeMetricTab.toUpperCase()}_UTILIZATION`}
                 color={activeMetricTab === 'error_rate' ? '#F43F5E' : '#00F5FF'}
                 yUnit={activeMetricTab === 'cpu' || activeMetricTab === 'memory' ? '%' : activeMetricTab === 'response_time' ? 'ms' : '%'}
@@ -350,50 +406,30 @@ export const Dashboard = () => {
             </div>
           </div>
 
-          {/* Recent Anomalies Table */}
-          <div className="glass-card p-4 rounded border-white/6 flex flex-col text-left">
+          {/* Expandable Incidents Feed */}
+          <div className="glass-card p-4.5 rounded border-white/6 flex flex-col text-left">
             <h2 className="text-xs font-semibold text-white uppercase tracking-widest border-b border-white/5 pb-2 mb-3">
-              RECENT_DETECTION_ANOMALIES
+              ACTIVE_CORRELATED_INCIDENTS ({activeIncidents.length})
             </h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="border-b border-white/5 font-mono text-[10px] text-neutral-500 uppercase tracking-wider select-none">
-                    <th className="py-2.5">Time</th>
-                    <th className="py-2.5">Service</th>
-                    <th className="py-2.5">Metric</th>
-                    <th className="py-2.5">Severity</th>
-                    <th className="py-2.5 text-right pr-4">Z-Score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {anomaliesList.map((anom) => (
-                    <tr key={anom.id} className="border-b border-white/[0.02] hover:bg-white/[0.01] transition-all">
-                      <td className="py-2.5 font-mono text-neutral-500">
-                        {new Date(anom.created_at).toLocaleTimeString()}
-                      </td>
-                      <td className="py-2.5 font-mono font-bold text-white uppercase">
-                        {anom.service_name || 'api-gateway'}
-                      </td>
-                      <td className="py-2.5 text-neutral-400 font-mono">
-                        {anom.metric_type}
-                      </td>
-                      <td className="py-2.5">
-                        <SeverityBadge severity={anom.severity} />
-                      </td>
-                      <td className="py-2.5 w-1/4">
-                        <AnomalyScoreBar score={anom.score} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              {activeIncidents.length === 0 ? (
+                <div className="py-8 flex flex-col items-center justify-center space-y-2 border border-dashed border-white/5 rounded-lg bg-white/[0.01]">
+                  <ShieldCheck className="w-8 h-8 text-status-healthy opacity-80" />
+                  <p className="font-mono text-[9px] uppercase tracking-widest text-neutral-500 font-bold">
+                    NO_ACTIVE_INCIDENTS_FOUND
+                  </p>
+                </div>
+              ) : (
+                activeIncidents.map((inc) => (
+                  <IncidentCard key={inc.id} incident={inc} />
+                ))
+              )}
             </div>
           </div>
 
         </div>
 
-        {/* RIGHT PANEL (4 cols) */}
+        {/* RIGHT PANEL */}
         <div className="lg:col-span-4 flex flex-col space-y-6">
           
           {/* Service Health Grid */}
@@ -403,7 +439,6 @@ export const Dashboard = () => {
             </h2>
             <div className="grid grid-cols-1 gap-2.5">
               {services.map((srv) => {
-                // Calculate score per service based on active alerts
                 const srvAlerts = alerts.filter(a => !a.is_resolved && a.service_id === srv.id)
                 const srvScore = Math.max(0, 100 - srvAlerts.length * 20)
                 
