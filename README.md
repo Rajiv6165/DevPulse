@@ -1,5 +1,9 @@
 # DevPulse - AI-Powered DevOps Observability Dashboard
 
+[![DevPulse CI/CD Pipeline](https://github.com/Rajiv6165/DevPulse/actions/workflows/deploy.yml/badge.svg)](https://github.com/Rajiv6165/DevPulse/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Deployed on AWS](https://img.shields.io/badge/Deployed%20on-AWS%20EC2-orange.svg?logo=amazon-aws)](https://aws.amazon.com/)
+
 DevPulse is an AI-powered real-time DevOps observability platform designed to monitor service health, ingest system metrics, track latencies, and auto-detect anomalies using machine learning.
 
 ---
@@ -54,6 +58,19 @@ DevPulse is an AI-powered real-time DevOps observability platform designed to mo
 |                                                                                         |
 +-----------------------------------------------------------------------------------------+
 ```
+
+---
+
+## Architecture Decisions
+
+### 1. Redis Streams over a Simple Queue
+We chose Redis Streams because it supports persistent log structures, multiple independent consumer groups, and replayable message queues. This allows DevPulse to fan out raw metrics to the real-time anomaly engine, storage archivers, and alert dispatchers concurrently without data loss or pipeline blocking.
+
+### 2. Ensemble Anomaly Detection over a Single Algorithm
+Observability data is highly dynamic, containing linear trends, sudden spikes, and seasonal cycles. An ensemble combining Rolling Z-Scores (for spikes), Isolation Forests (for non-linear outliers), and Seasonal EMA (for time-of-day variations) provides superior precision, reduces alert fatigue, and adapts to changing workloads.
+
+### 3. Supabase over Self-Hosted Postgres
+To minimize operational overhead while maintaining a reliable relational model for complex timelines, we opted for Supabase. It offers managed PostgreSQL, built-in connection pooling via PgBouncer to handle microservice scales, and automated backups, allowing us to focus entirely on analytics.
 
 ---
 
@@ -120,19 +137,32 @@ S3 is used for long-term historical metrics archiving.
 
 ## Production Deployment (AWS EC2)
 
-We provide an automated setup script to set up a fresh **Ubuntu 22.04 LTS (t2.micro)** EC2 instance:
+We provide an automated setup script to set up and configure a fresh **Ubuntu 22.04 LTS** EC2 instance:
 
-1. Clone the repository onto the EC2 instance or copy [ec2_setup.sh](file:///c:/Users/rajiv/OneDrive/Desktop/Projects/Main%20Projects/DevPulse/ec2_setup.sh) to the host.
-2. Run the script as root, passing your domain name and Let's Encrypt notifications email:
+1. Copy the idempotent [ec2_setup.sh](file:///c:/Users/rajiv/OneDrive/Desktop/Projects/Main%20Projects/DevPulse/ec2_setup.sh) setup script to your EC2 instance.
+2. Execute the script as root, passing your custom domain name and email address for Certbot registration:
    ```bash
    sudo chmod +x ec2_setup.sh
    sudo ./ec2_setup.sh devpulse.yourdomain.com admin@yourdomain.com
    ```
-3. Populate the generated environmental config file at `/home/ubuntu/DevPulse/.env`.
-4. Start the systemd service managing the Docker container stack:
+3. Populate the environment configuration file created at `/home/ubuntu/DevPulse/.env` (re-runs will safely preserve your existing `.env`).
+4. Start the systemd service managing the container stack:
    ```bash
    sudo systemctl start devpulse.service
    ```
+5. Ensure your domain's DNS is pointing at the EC2 public IP. Nginx is configured as a reverse proxy forwarding requests to the Docker containers (frontend on port 8080 and backend on port 8000), complete with Let's Encrypt SSL and auto-renewal checks.
+
+### CI/CD Deployment with Rollback Safety
+Every push to the `main` branch triggers the GitHub Actions workflow defined in `.github/workflows/deploy.yml`. 
+- **Rollback Safety**: During the deployment, the workflow tags the currently running docker image as `backup`, pulls the latest code, and runs a startup loop for the backend container. If the backend fails its `HEALTHCHECK` within 30 seconds, it automatically reverts back to the backup image and restarts the container, failing the GitHub action pipeline loudly.
+
+### Required GitHub Repository Secrets
+For the CI/CD pipeline to work, configure the following secrets in GitHub Repository Settings under **Settings > Secrets and variables > Actions**:
+- `EC2_HOST`: Public IP or domain name of the EC2 deployment server.
+- `EC2_USER`: SSH username (typically `ubuntu`).
+- `EC2_SSH_KEY`: Private SSH Key used to log into the host.
+- `VERCEL_TOKEN`: Vercel personal access token for frontend deployment.
+- `VERCEL_PROJECT_ID`: Vercel project ID for frontend deployment.
 
 ---
 

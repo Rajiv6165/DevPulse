@@ -1,4 +1,5 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,7 +104,6 @@ app.include_router(incidents.router)
 def health_check():
     """Verify application status and connectivity."""
     return {
-        "status": "healthy",
-        "service": "DevPulse Backend",
-        "version": "1.0.0"
+        "status": "ok",
+        "timestamp": time.time()
     }

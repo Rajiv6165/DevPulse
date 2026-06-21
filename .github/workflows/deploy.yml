@@ -24,6 +24,10 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pytest httpx pytest-asyncio
 
+      - name: Install SDK in Editable Mode
+        run: |
+          pip install -e ./devpulse-sdk
+
       - name: Run Pytest
         env:
           SUPABASE_URL: "https://example.supabase.co"
@@ -35,6 +39,7 @@ jobs:
         run: |
           export PYTHONPATH=backend
           pytest backend/tests/
+          pytest devpulse-sdk/tests/
 
   lint:
     name: Code Quality Linting
@@ -82,8 +87,64 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /home/${{ secrets.EC2_USER }}/DevPulse
+            
+            # 1. Backup the currently running backend image
+            # Try tagging both devpulse-backend and devpulse_backend
+            docker tag devpulse-backend:latest devpulse-backend:backup || true
+            docker tag devpulse_backend:latest devpulse_backend:backup || true
+            
+            # 2. Pull the latest code and build/start the new backend container
             git pull origin main
-            docker compose -f docker-compose.yml up -d --build
+            docker compose -f docker-compose.yml up -d --build backend
+            
+            # 3. Monitor health status of the new backend container for up to 30 seconds
+            echo "Monitoring health check of the new backend deployment..."
+            HEALTH_OK=false
+            for i in {1..30}; do
+              CONTAINER_ID=$(docker compose ps -q backend)
+              if [ -z "$CONTAINER_ID" ]; then
+                echo "Error: Backend container is not running."
+                break
+              fi
+              
+              STATUS=$(docker inspect --format='{{json .State.Health.Status}}' "$CONTAINER_ID" 2>/dev/null || echo "starting")
+              STATUS=${STATUS//\"/}
+              
+              if [ "$STATUS" = "healthy" ]; then
+                echo "New backend container is healthy!"
+                HEALTH_OK=true
+                break
+              elif [ "$STATUS" = "unhealthy" ]; then
+                echo "Error: Container health check reports UNHEALTHY."
+                break
+              else
+                echo "Container status is: $STATUS... waiting ($i/30s)"
+                sleep 1
+              fi
+            done
+            
+            # 4. Rollback if the health check failed
+            if [ "$HEALTH_OK" = "false" ]; then
+              echo "WARNING: Health check failed! Initiating rollback..."
+              docker compose stop backend || true
+              
+              # Revert backend image tag back to backup
+              if docker image inspect devpulse-backend:backup >/dev/null 2>&1; then
+                docker tag devpulse-backend:backup devpulse-backend:latest
+                docker compose up -d --no-deps backend
+                echo "Successfully rolled back to previous devpulse-backend image."
+              elif docker image inspect devpulse_backend:backup >/dev/null 2>&1; then
+                docker tag devpulse_backend:backup devpulse_backend:latest
+                docker compose up -d --no-deps backend
+                echo "Successfully rolled back to previous devpulse_backend image."
+              else
+                echo "Error: No backup image available to roll back to."
+              fi
+              exit 1
+            fi
+            
+            # 5. Build/run everything else (frontend) and clean up
+            docker compose -f docker-compose.yml up -d --build frontend
             docker image prune -f
 
   deploy-frontend:

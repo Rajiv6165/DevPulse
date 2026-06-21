@@ -17,9 +17,10 @@ from ml.forecaster import Forecaster
 from ml.explainer import Explainer
 from ml.correlator import IncidentCorrelator
 
+import asyncio
+
 # --- Test Z-Score Detector ---
-@pytest.mark.asyncio
-async def test_zscore_detector_push_and_get():
+def test_zscore_detector_push_and_get():
     detector = ZScoreDetector()
     
     mock_redis = AsyncMock()
@@ -30,15 +31,18 @@ async def test_zscore_detector_push_and_get():
         '10.5' # Test fallback/backward compatibility
     ]
     
-    with patch("ml.zscore.async_redis_client", mock_redis):
-        values = await detector.push_and_get_window("s-1", "cpu", 15.0)
-        assert len(values) == 4
-        assert values == [10.0, 12.0, 11.0, 10.5]
-        assert mock_redis.lpush.called
-        assert mock_redis.ltrim.called
+    async def run_test():
+        with patch("ml.zscore.async_redis_client", mock_redis):
+            return await detector.push_and_get_window("s-1", "cpu", 15.0)
+            
+    values = asyncio.run(run_test())
+    assert len(values) == 4
+    assert values == [10.0, 12.0, 11.0, 10.5]
+    assert mock_redis.lpush.called
+    assert mock_redis.ltrim.called
 
-@pytest.mark.asyncio
-async def test_zscore_detector_timestamped_window():
+
+def test_zscore_detector_timestamped_window():
     detector = ZScoreDetector()
     mock_redis = AsyncMock()
     mock_redis.lrange.return_value = [
@@ -47,12 +51,16 @@ async def test_zscore_detector_timestamped_window():
         '15.0' # Fallback
     ]
     
-    with patch("ml.zscore.async_redis_client", mock_redis):
-        window = await detector.get_timestamped_window("s-1", "cpu")
-        # Should be reversed to chronological order
-        assert len(window) == 3
-        assert window[0]["v"] == 15.0  # fallback was at end of index (oldest after reverse)
-        assert window[2]["v"] == 20.0  # first index becomes last (newest after reverse)
+    async def run_test():
+        with patch("ml.zscore.async_redis_client", mock_redis):
+            return await detector.get_timestamped_window("s-1", "cpu")
+            
+    window = asyncio.run(run_test())
+    # Should be reversed to chronological order
+    assert len(window) == 3
+    assert window[0]["v"] == 15.0  # fallback was at end of index (oldest after reverse)
+    assert window[2]["v"] == 20.0  # first index becomes last (newest after reverse)
+
 
 
 # --- Test Forecaster ---
