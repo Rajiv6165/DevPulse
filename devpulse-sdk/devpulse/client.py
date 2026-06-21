@@ -4,10 +4,10 @@ import logging
 import queue
 import threading
 import time
-from contextlib import contextmanager
-from functools import wraps
 from typing import Any, Dict, Optional, Callable
 import requests
+
+from devpulse.exceptions import DevPulseConfigError
 
 # Logger configuration
 logger = logging.getLogger("devpulse")
@@ -40,7 +40,10 @@ class DevPulseClient:
         self,
         api_key: str,
         service_id: str,
-        base_url: str = "https://your-devpulse.com"
+        base_url: str = "https://your-devpulse.com",
+        flush_interval: float = 5.0,
+        max_buffer_size: int = 50,
+        debug: bool = False
     ):
         """
         Initialize the DevPulse SDK client.
@@ -48,14 +51,26 @@ class DevPulseClient:
         :param api_key: Service API key for authentication header.
         :param service_id: The UUID representing the monitored service.
         :param base_url: DevPulse dashboard API server host URL.
+        :param flush_interval: Maximum interval in seconds between background flushes.
+        :param max_buffer_size: Maximum batch size before triggering immediate flush.
+        :param debug: If True, logs metrics activities using Python's standard logger.
         """
+        if not api_key:
+            raise DevPulseConfigError("DevPulseClient configuration error: api_key is required.")
+        if not service_id:
+            raise DevPulseConfigError("DevPulseClient configuration error: service_id is required.")
+
         self.api_key = api_key
         self.service_id = service_id
         self.base_url = base_url.rstrip("/")
+        self.flush_interval = flush_interval
+        self.max_buffer_size = max_buffer_size
+        self.debug = debug
         
         self.queue = queue.Queue()
         self.lock = threading.Lock()
         self.shutdown_triggered = False
+        self.server_unreachable = False
         
         # Start the background worker thread
         self.worker_thread = threading.Thread(target=self._worker, daemon=True)
@@ -68,6 +83,15 @@ class DevPulseClient:
         if get_default_client() is None:
             set_default_client(self)
 
+    def health_check(self) -> bool:
+        """Pings the DevPulse backend /health endpoint to check reachability."""
+        try:
+            url = f"{self.base_url}/health"
+            response = requests.get(url, timeout=3.0)
+            return response.status_code == 200
+        except Exception:
+            return False
+
     def push_metric(
         self,
         metric_type: str,
@@ -78,21 +102,35 @@ class DevPulseClient:
         Core telemetry pushing function. Places metric onto the queue
         for dynamic background processing. Fire-and-forget.
         """
-        if metadata is None:
-            metadata = {}
+        try:
+            if metadata is None:
+                metadata = {}
+                
+            # Standard schema payload formatting
+            metric_payload = {
+                "service_id": self.service_id,
+                "metric_type": metric_type,
+                "value": float(value),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "metadata": metadata
+            }
             
-        # Standard schema payload formatting
-        metric_payload = {
-            "service_id": self.service_id,
-            "metric_type": metric_type,
-            "value": float(value),
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "metadata": metadata
-        }
-        
-        with self.lock:
-            if not self.shutdown_triggered:
-                self.queue.put(metric_payload)
+            if self.debug:
+                logger.info("Queued metric: %s", metric_payload)
+            
+            with self.lock:
+                # Local capacity hard cap: drop oldest item if queue has 500+ items
+                if self.queue.qsize() >= 500:
+                    try:
+                        self.queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                
+                if not self.shutdown_triggered:
+                    self.queue.put(metric_payload)
+        except Exception as e:
+            # Outage/network issues must never crash or raise in host app code paths
+            logger.warning("Error pushing metric to DevPulse queue: %s", e)
 
     # Shorthand methods
     def push_cpu(self, value: float, metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -119,7 +157,6 @@ class DevPulseClient:
         self.push_metric("custom", value, meta)
 
     # Context Manager
-    @contextmanager
     def track_block(self, name: str, metadata: Optional[Dict[str, Any]] = None):
         """
         Context manager that tracks code execution time and reports it as a custom metric.
@@ -128,12 +165,8 @@ class DevPulseClient:
             with dp.track_block("database_query"):
                 # run DB operations
         """
-        start_time = time.perf_counter()
-        try:
-            yield
-        finally:
-            duration_ms = (time.perf_counter() - start_time) * 1000.0
-            self.push_custom(name, duration_ms, metadata)
+        from devpulse.context_managers import TrackBlock
+        return TrackBlock(self, name, metadata)
 
     # Instance Decorators (binds decorators to this client instance)
     def track_request(self, func: Callable) -> Callable:
@@ -142,6 +175,7 @@ class DevPulseClient:
         Supports both synchronous and asynchronous functions.
         """
         import inspect
+        from functools import wraps
 
         if inspect.iscoroutinefunction(func):
             @wraps(func)
@@ -192,45 +226,41 @@ class DevPulseClient:
     def _worker(self) -> None:
         """
         Background worker running inside a daemon thread.
-        Monitors queue and flushes on max buffer size (50) or max elapsed time (5s).
+        Monitors queue and flushes on max buffer size or max elapsed time.
         """
-        buffer = []
         last_flush = time.time()
         
         while not self.shutdown_triggered:
             try:
-                # 1. Block on queue to get the first item of a batch
-                if not buffer:
-                    try:
-                        # Periodic 1.0s timeout to allow check of shutdown_triggered
-                        item = self.queue.get(timeout=1.0)
-                        buffer.append(item)
-                        self.queue.task_done()
-                        last_flush = time.time()
-                    except queue.Empty:
-                        continue
-                
-                # 2. Collect remaining available items non-blockingly up to limit of 50
-                while len(buffer) < 50:
-                    try:
-                        item = self.queue.get_nowait()
-                        buffer.append(item)
-                        self.queue.task_done()
-                    except queue.Empty:
-                        break
-                
-                # 3. Flush if buffer limit reached or time limit expired
+                time.sleep(0.1)
                 now = time.time()
-                if len(buffer) >= 50 or (now - last_flush >= 5.0):
-                    self._send_batch(buffer)
-                    buffer = []
-                    last_flush = time.time()
+                
+                # Check if we need to flush
+                qsize = self.queue.qsize()
+                if qsize >= self.max_buffer_size or (now - last_flush >= self.flush_interval and qsize > 0):
+                    # Gather batch
+                    batch = []
+                    for _ in range(min(qsize, self.max_buffer_size)):
+                        try:
+                            batch.append(self.queue.get_nowait())
+                        except queue.Empty:
+                            break
                     
+                    if batch:
+                        self._send_batch(batch)
+                        last_flush = time.time()
+                        
             except Exception as e:
                 logger.warning("Error in DevPulse background worker thread: %s", e)
 
     def _send_batch(self, batch: list) -> None:
-        """Send a batch of metrics to the DevPulse server, catching any connection errors."""
+        """Send a batch of metrics to the DevPulse server with exponential retry backoff."""
+        if not batch:
+            return
+
+        if self.debug:
+            logger.info("Sending batch of %d metrics", len(batch))
+
         url = f"{self.base_url}/metrics/ingest"
         headers = {
             "Content-Type": "application/json",
@@ -239,15 +269,51 @@ class DevPulseClient:
         
         session = requests.Session()
         for metric in batch:
+            success = False
+            for attempt in range(3):
+                backoff_time = 2 ** attempt  # 1s, 2s, 4s
+                try:
+                    response = session.post(url, json=metric, headers=headers, timeout=5.0)
+                    if response.status_code in (200, 201):
+                        success = True
+                        if self.server_unreachable:
+                            logger.info("DevPulse server is reachable again.")
+                            self.server_unreachable = False
+                        break
+                    else:
+                        logger.warning(
+                            "DevPulse failed to record metric: Server returned status %d. Response: %s",
+                            response.status_code, response.text
+                        )
+                except requests.exceptions.RequestException as e:
+                    if not self.server_unreachable:
+                        logger.warning("DevPulse server is unreachable. Metrics will be buffered locally. Error: %s", e)
+                        self.server_unreachable = True
+                
+                # Wait before retrying (unless it's the last attempt)
+                if attempt < 2:
+                    time.sleep(backoff_time)
+            
+            # If the metric failed after 3 attempts, put it and the remaining ones back into the queue
+            if not success:
+                with self.lock:
+                    failed_idx = batch.index(metric)
+                    for m in reversed(batch[failed_idx:]):
+                        if self.queue.qsize() < 500:
+                            self.queue.put(m)
+                break
+
+    def flush(self) -> None:
+        """Manually force-send all buffered metrics immediately."""
+        buffer = []
+        while not self.queue.empty():
             try:
-                response = session.post(url, json=metric, headers=headers, timeout=5.0)
-                if response.status_code not in (200, 201):
-                    logger.warning(
-                        "DevPulse failed to record metric: Server returned status %d. Response: %s",
-                        response.status_code, response.text
-                    )
-            except requests.exceptions.RequestException as e:
-                logger.warning("DevPulse server connection error. Failed to send metric: %s", e)
+                buffer.append(self.queue.get_nowait())
+            except queue.Empty:
+                break
+        
+        if buffer:
+            self._send_batch(buffer)
 
     def shutdown(self) -> None:
         """Triggered on atexit shutdown. Drains remaining queue items and flushes them."""
@@ -256,19 +322,8 @@ class DevPulseClient:
                 return
             self.shutdown_triggered = True
             
-        # Drain all remaining elements in the queue
-        buffer = []
-        while True:
-            try:
-                item = self.queue.get_nowait()
-                buffer.append(item)
-                self.queue.task_done()
-            except queue.Empty:
-                break
-                
-        if buffer:
-            self._send_batch(buffer)
-            
+        self.flush()
+        
         # Gracefully shut down worker thread
         try:
             self.worker_thread.join(timeout=2.0)

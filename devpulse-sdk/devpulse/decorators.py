@@ -74,18 +74,13 @@ def track_function(func: Optional[Callable] = None, *, client: Optional[Any] = N
 
 def track_endpoint(func: Optional[Callable] = None, *, client: Optional[Any] = None) -> Callable:
     """
-    Decorator for FastAPI/Starlette routes to track response times and status codes.
-    Supports both synchronous and asynchronous routes.
+    Decorator for route handlers (e.g. FastAPI) to track latency and response status codes.
+    Supports both synchronous and asynchronous endpoints.
 
     Usage:
         @app.get("/items")
         @track_endpoint
         def read_items():
-            ...
-
-        @app.post("/items")
-        @track_endpoint(client=custom_client)
-        async def create_item():
             ...
     """
     def decorator(f: Callable) -> Callable:

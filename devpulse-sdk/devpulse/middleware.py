@@ -1,4 +1,5 @@
 import time
+import uuid
 from typing import Any, Optional
 
 # Safe framework import checking
@@ -29,14 +30,19 @@ if HAS_STARLETTE:
             self.client = client or get_default_client()
 
         async def dispatch(self, request: Any, call_next: Any) -> Any:
+            request_id = request.headers.get("DevPulse-Request-Id") or str(uuid.uuid4())
+
             if not self.client:
-                return await call_next(request)
+                response = await call_next(request)
+                response.headers["DevPulse-Request-Id"] = request_id
+                return response
 
             start_time = time.perf_counter()
             status_code = 500
             try:
                 response = await call_next(request)
                 status_code = response.status_code
+                response.headers["DevPulse-Request-Id"] = request_id
                 return response
             except Exception as e:
                 status_code = 500
@@ -48,7 +54,8 @@ if HAS_STARLETTE:
                 meta = {
                     "path": path,
                     "method": method,
-                    "status_code": status_code
+                    "status_code": status_code,
+                    "request_id": request_id
                 }
                 # Record telemetry metrics
                 self.client.push_response_time(duration_ms, meta)
@@ -91,8 +98,8 @@ class DevPulseDjangoMiddleware:
                 pass
 
         # Detect if we should run in sync or async mode
-        import asyncio
-        if asyncio.iscoroutinefunction(self.get_response):
+        import inspect
+        if inspect.iscoroutinefunction(self.get_response):
             self._call_handler = self._async_call
         else:
             self._call_handler = self._sync_call
@@ -101,45 +108,81 @@ class DevPulseDjangoMiddleware:
         return self._call_handler(request)
 
     def _sync_call(self, request: Any) -> Any:
+        request_id = None
+        if hasattr(request, "headers"):
+            request_id = request.headers.get("DevPulse-Request-Id")
+        if not request_id and hasattr(request, "META"):
+            request_id = request.META.get("HTTP_DEVPULSE_REQUEST_ID")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+
         if not self.client:
-            return self.get_response(request)
+            response = self.get_response(request)
+            try:
+                response["DevPulse-Request-Id"] = request_id
+            except Exception:
+                pass
+            return response
 
         start_time = time.perf_counter()
         status_code = 500
         try:
             response = self.get_response(request)
             status_code = response.status_code
+            try:
+                response["DevPulse-Request-Id"] = request_id
+            except Exception:
+                pass
             return response
         except Exception as e:
             status_code = 500
             raise e
         finally:
-            self._record_metrics(start_time, request, status_code)
+            self._record_metrics(start_time, request, status_code, request_id)
 
     async def _async_call(self, request: Any) -> Any:
+        request_id = None
+        if hasattr(request, "headers"):
+            request_id = request.headers.get("DevPulse-Request-Id")
+        if not request_id and hasattr(request, "META"):
+            request_id = request.META.get("HTTP_DEVPULSE_REQUEST_ID")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+
         if not self.client:
-            return await self.get_response(request)
+            response = await self.get_response(request)
+            try:
+                response["DevPulse-Request-Id"] = request_id
+            except Exception:
+                pass
+            return response
 
         start_time = time.perf_counter()
         status_code = 500
         try:
             response = await self.get_response(request)
             status_code = response.status_code
+            try:
+                response["DevPulse-Request-Id"] = request_id
+            except Exception:
+                pass
             return response
         except Exception as e:
             status_code = 500
             raise e
         finally:
-            self._record_metrics(start_time, request, status_code)
+            self._record_metrics(start_time, request, status_code, request_id)
 
-    def _record_metrics(self, start_time: float, request: Any, status_code: int) -> None:
+    def _record_metrics(self, start_time: float, request: Any, status_code: int, request_id: str) -> None:
         duration_ms = (time.perf_counter() - start_time) * 1000.0
         path = getattr(request, "path", "")
         method = getattr(request, "method", "")
         meta = {
             "path": path,
             "method": method,
-            "status_code": status_code
+            "status_code": status_code,
+            "request_id": request_id
         }
         self.client.push_response_time(duration_ms, meta)
         self.client.push_error_rate(100.0 if status_code >= 400 else 0.0, meta)
+

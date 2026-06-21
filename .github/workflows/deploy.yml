@@ -73,7 +73,6 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: Production
-      url: http://${{ secrets.EC2_HOST }}
     steps:
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3

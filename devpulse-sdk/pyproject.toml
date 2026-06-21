@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "devpulse-sdk"
+version = "1.0.0"
+description = "Official Python SDK for DevPulse Observability Dashboard"
+readme = "README.md"
+requires-python = ">=3.7"
+license = { text = "MIT" }
+authors = [
+    { name = "DevPulse Team", email = "support@devpulse.com" }
+]
+dependencies = [
+    "requests>=2.25.0"
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
