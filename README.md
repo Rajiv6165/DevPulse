@@ -96,6 +96,22 @@ S3 is used for long-term historical metrics archiving.
 
 ---
 
+## Database Setup
+
+To configure the Supabase database for DevPulse:
+
+1. **Go to Supabase → SQL Editor** by logging into your [Supabase Dashboard](https://supabase.com) and selecting your project.
+2. **Run [supabase/schema.sql](file:///c:/Users/rajiv/OneDrive/Desktop/Projects/Main%20Projects/DevPulse/supabase/schema.sql) first** to create all tables, relationships, constraints, and performance indexes.
+3. **Run [supabase/seed.sql](file:///c:/Users/rajiv/OneDrive/Desktop/Projects/Main%20Projects/DevPulse/supabase/seed.sql) to add test data** (optional but recommended for testing). This inserts:
+   - 1 test user (`test@devpulse.com` with password `testpassword123`)
+   - 2 test services ("Payment Service" and "Order Service") owned by that user
+   - 20 sample metric rows spread across both services covering all 4 metric types
+   - 3 sample alerts (1 critical, 1 medium, 1 low)
+   - 2 sample anomalies
+   - 1 sample active incident linking both services
+
+---
+
 ## Local Development Setup
 
 ### 1. Backend Setup
