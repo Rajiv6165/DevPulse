@@ -30,6 +30,7 @@ export const ServiceHealthCard = ({
   return (
     <Link 
       to={`/services/${id}`}
+      title={`Click to view details for ${name}`}
       className="glass-card p-3 rounded flex items-center justify-between glass-card-hover select-none border-white/6"
     >
       <div className="flex items-center space-x-3 text-left">

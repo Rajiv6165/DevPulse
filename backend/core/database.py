@@ -5,7 +5,11 @@ from supabase import create_client, Client
 from core.config import settings
 
 # Initialize the Supabase Client
-supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+try:
+    supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+except Exception as e:
+    print(f"[Database] Warning: Could not initialize Supabase client: {e}")
+    supabase = None
 
 @contextmanager
 def get_db_connection():

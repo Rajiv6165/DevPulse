@@ -104,6 +104,8 @@ export const Login = () => {
 
   // --- DEMO BYPASS HANDLER ---
   const handleDemoMode = () => {
+    // Initialize demo data
+    useStore.getState().initializeDemoData()
     // Generate dummy token to authenticate instantly
     loginStore('demo_jwt_token_key_devpulse')
     navigate('/dashboard')

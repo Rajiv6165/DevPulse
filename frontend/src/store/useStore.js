@@ -5,11 +5,11 @@ const getStoredToken = () => localStorage.getItem('devpulse_token') || null
 
 // Initial dummy logs for the live terminal log stream
 const initialLogs = [
-  { level: 'INFO', message: 'System initialization sequence triggered...', timestamp: new Date() },
-  { level: 'DEBUG', message: 'Configured connection pool: min=5, max=20', timestamp: new Date() },
-  { level: 'INFO', message: 'Supabase client database connection established.', timestamp: new Date() },
-  { level: 'INFO', message: 'Upstash Redis stream consumer group registered: anomaly-workers', timestamp: new Date() },
-  { level: 'DEBUG', message: 'Background worker active. Listening on stream: devpulse:metrics:stream', timestamp: new Date() },
+  { id: 'log-init-1', level: 'INFO', message: 'System initialization sequence triggered...', timestamp: new Date() },
+  { id: 'log-init-2', level: 'DEBUG', message: 'Configured connection pool: min=5, max=20', timestamp: new Date() },
+  { id: 'log-init-3', level: 'INFO', message: 'Supabase client database connection established.', timestamp: new Date() },
+  { id: 'log-init-4', level: 'INFO', message: 'Upstash Redis stream consumer group registered: anomaly-workers', timestamp: new Date() },
+  { id: 'log-init-5', level: 'DEBUG', message: 'Background worker active. Listening on stream: devpulse:metrics:stream', timestamp: new Date() },
 ]
 
 export const useStore = create((set, get) => ({
@@ -146,14 +146,16 @@ export const useStore = create((set, get) => ({
   logs: initialLogs,
   addLog: (logLine) => {
     set((state) => {
-      const updatedLogs = [...state.logs, {
+      const newLog = {
+        id: logLine.id || `log-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
         level: logLine.level || 'INFO',
         message: logLine.message,
         timestamp: logLine.timestamp ? new Date(logLine.timestamp) : new Date()
-      }]
+      }
+      const updatedLogs = [...state.logs, newLog]
       
       // Cap terminal log stream lines to prevent browser lags
-      if (updatedLogs.length > 150) {
+      if (updatedLogs.length > 100) {
         updatedLogs.shift()
       }
       return { logs: updatedLogs }
@@ -265,5 +267,106 @@ export const useStore = create((set, get) => ({
     } else {
       get().addLog(logOptions[Math.floor(Math.random() * logOptions.length)])
     }
+  },
+
+  // --- DEMO INITIALIZATION ---
+  initializeDemoData: () => {
+    const services = [
+      { id: 'srv-auth-1', name: 'auth-service' },
+      { id: 'srv-db-2', name: 'db-pool-manager' },
+      { id: 'srv-gateway-3', name: 'api-gateway' },
+      { id: 'srv-payments-4', name: 'payment-processor' }
+    ].map(s => ({
+      id: s.id,
+      name: s.name,
+      description: `Microservice managing ${s.name.split('-')[0]} operations.`,
+      api_key: `dp_mock_${s.id}`,
+      owner_id: 'user-1',
+      created_at: new Date().toISOString(),
+      is_active: true
+    }));
+
+    const historicalMetrics = {};
+    const latestMetrics = {};
+    const now = new Date();
+
+    services.forEach(service => {
+      historicalMetrics[service.id] = {
+        cpu: [],
+        memory: [],
+        error_rate: [],
+        response_time: []
+      };
+
+      latestMetrics[service.id] = {};
+
+      const mTypes = ['cpu', 'memory', 'error_rate', 'response_time'];
+      mTypes.forEach(mType => {
+        let baseVal = 30;
+        if (mType === 'cpu') baseVal = 45;
+        else if (mType === 'memory') baseVal = 60;
+        else if (mType === 'error_rate') baseVal = 0.5;
+        else if (mType === 'response_time') baseVal = 120;
+
+        for (let i = 20; i >= 0; i--) {
+          const timestamp = new Date(now.getTime() - i * 15000); // spaced 15s apart
+          let val = baseVal;
+          if (mType === 'cpu') val = Math.max(10, Math.min(95, baseVal + (Math.random() - 0.5) * 15));
+          else if (mType === 'memory') val = Math.max(20, Math.min(90, baseVal + (Math.random() - 0.5) * 8));
+          else if (mType === 'error_rate') val = Math.random() < 0.08 ? Math.random() * 5 : Math.max(0, Math.min(1.5, baseVal + (Math.random() - 0.5) * 0.3));
+          else if (mType === 'response_time') val = Math.max(30, Math.min(800, baseVal + (Math.random() - 0.5) * 60));
+
+          historicalMetrics[service.id][mType].push({
+            timestamp,
+            value: parseFloat(val.toFixed(2))
+          });
+
+          if (i === 0) {
+            latestMetrics[service.id][mType] = parseFloat(val.toFixed(2));
+            latestMetrics[service.id].last_updated = now;
+          }
+        }
+      });
+    });
+
+    const mockAlerts = [
+      {
+        id: 'mock-alert-1',
+        service_id: 'srv-db-2',
+        severity: 'critical',
+        message: 'Database connection pool utilization reached 94% on db-pool-manager.',
+        is_resolved: false,
+        created_at: new Date(now.getTime() - 5 * 60000).toISOString()
+      },
+      {
+        id: 'mock-alert-2',
+        service_id: 'srv-payments-4',
+        severity: 'medium',
+        message: 'Latency spike on GET /charge endpoint: 420ms (Z-Score: 2.15).',
+        is_resolved: false,
+        created_at: new Date(now.getTime() - 2 * 60000).toISOString()
+      }
+    ];
+
+    const mockIncidents = [
+      {
+        id: 'mock-inc-1',
+        root_cause_service_id: 'srv-db-2',
+        root_cause_service_name: 'db-pool-manager',
+        affected_service_ids: ['srv-payments-4', 'srv-auth-1'],
+        started_at: new Date(now.getTime() - 10 * 60000).toISOString(),
+        resolved_at: null,
+        summary: 'Grouped incident: db-pool-manager exhausted connection capacity. Downstream impacts observed on payment-processor and auth-service.'
+      }
+    ];
+
+    set({
+      services,
+      historicalMetrics,
+      latestMetrics,
+      alerts: mockAlerts,
+      incidents: mockIncidents,
+      wsConnected: false
+    });
   }
 }))

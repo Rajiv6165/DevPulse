@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bell, LogOut, ShieldAlert, Cpu, Activity, Clock, ShieldCheck, Heart, AlertOctagon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -13,6 +13,7 @@ import AlertFeedItem from '../components/AlertFeedItem'
 import LiveTerminal from '../components/LiveTerminal'
 import SeverityBadge from '../components/SeverityBadge'
 import IncidentCard from '../components/IncidentCard'
+import SkeletonLoader from '../components/SkeletonLoader'
 
 export const Dashboard = () => {
   const navigate = useNavigate()
@@ -41,6 +42,7 @@ export const Dashboard = () => {
   const [activeMetricTab, setActiveMetricTab] = useState('cpu')
   const [showBellDropdown, setShowBellDropdown] = useState(false)
   const [forecastData, setForecastData] = useState([])
+  const [isChartLoading, setIsChartLoading] = useState(false)
 
   // Redirect to login if unauthenticated
   useEffect(() => {
@@ -49,10 +51,17 @@ export const Dashboard = () => {
     }
   }, [token, navigate])
 
-  // Trigger simulated telemetry ticks if WebSocket is disconnected
+  // Call initializeDemoData if page is reloaded in demo mode and services is empty
+  useEffect(() => {
+    if (token === 'demo_jwt_token_key_devpulse' && services.length === 0) {
+      useStore.getState().initializeDemoData()
+    }
+  }, [token, services.length])
+
+  // Trigger simulated telemetry ticks if WebSocket is disconnected (non-demo fallback only)
   useEffect(() => {
     let interval
-    if (!wsConnected) {
+    if (!wsConnected && token !== 'demo_jwt_token_key_devpulse') {
       generateMockTelemetry()
       interval = setInterval(() => {
         generateMockTelemetry()
@@ -61,7 +70,16 @@ export const Dashboard = () => {
     return () => {
       if (interval) clearInterval(interval)
     }
-  }, [wsConnected, generateMockTelemetry])
+  }, [wsConnected, generateMockTelemetry, token])
+
+  // Chart loader state on tab or service changes
+  useEffect(() => {
+    setIsChartLoading(true)
+    const timer = setTimeout(() => {
+      setIsChartLoading(false)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [activeMetricTab, currentServiceId])
 
   // --- FETCH DATA FROM BACKEND ---
   useEffect(() => {
@@ -102,16 +120,14 @@ export const Dashboard = () => {
   }, [token, setAlerts, setIncidents])
 
   // Format historical metrics for charts based on current service filter
-  const getChartData = () => {
+  const chartData = useMemo(() => {
     if (currentServiceId === 'all') {
       const serviceIds = Object.keys(historicalMetrics)
       if (serviceIds.length === 0) return []
       return historicalMetrics[serviceIds[0]]?.[activeMetricTab] || []
     }
     return historicalMetrics[currentServiceId]?.[activeMetricTab] || []
-  }
-
-  const chartData = getChartData()
+  }, [historicalMetrics, currentServiceId, activeMetricTab])
 
   // Fetch forecast telemetry
   useEffect(() => {
@@ -213,6 +229,16 @@ export const Dashboard = () => {
       transition={{ duration: 0.35, ease: 'easeOut' }}
       className="min-h-screen flex flex-col p-4 md:p-6 space-y-6 select-none relative"
     >
+      
+      {/* Demo Mode Banner */}
+      {token === 'demo_jwt_token_key_devpulse' && (
+        <div className="bg-gradient-to-r from-accent-cyan/10 via-accent-cyan/20 to-accent-cyan/10 border border-accent-cyan/20 rounded px-4 py-2.5 flex items-center justify-between text-xs font-mono text-accent-cyan shadow-[0_0_15px_rgba(0,245,255,0.05)] select-none">
+          <div className="flex items-center space-x-2.5 text-left">
+            <span className="w-2 h-2 rounded-full bg-accent-cyan animate-pulse shadow-[0_0_8px_#00F5FF]" />
+            <span><strong>DEMO MODE ACTIVE</strong> — Operating in sandbox mode with simulated real-time telemetry. Feel free to explore all features, click tabs, filter services, and resolve alerts locally.</span>
+          </div>
+        </div>
+      )}
       
       {/* Real-time Toast Notifications Container Overlay */}
       <div className="fixed top-6 right-6 z-50 flex flex-col space-y-2 max-w-sm pointer-events-none">
@@ -395,14 +421,20 @@ export const Dashboard = () => {
               </div>
             </div>
 
-            <div className="flex-1 min-h-[250px]">
-              <MetricChart 
-                data={chartData} 
-                forecastData={forecastData}
-                title={`${activeMetricTab.toUpperCase()}_UTILIZATION`}
-                color={activeMetricTab === 'error_rate' ? '#F43F5E' : '#00F5FF'}
-                yUnit={activeMetricTab === 'cpu' || activeMetricTab === 'memory' ? '%' : activeMetricTab === 'response_time' ? 'ms' : '%'}
-              />
+            <div className="flex-1 min-h-[250px] relative">
+              {isChartLoading ? (
+                <div className="h-[250px] flex items-center justify-center">
+                  <SkeletonLoader type="chart" />
+                </div>
+              ) : (
+                <MetricChart 
+                  data={chartData} 
+                  forecastData={forecastData}
+                  title={`${activeMetricTab.toUpperCase()}_UTILIZATION`}
+                  color={activeMetricTab === 'error_rate' ? '#F43F5E' : '#00F5FF'}
+                  yUnit={activeMetricTab === 'cpu' || activeMetricTab === 'memory' ? '%' : activeMetricTab === 'response_time' ? 'ms' : '%'}
+                />
+              )}
             </div>
           </div>
 

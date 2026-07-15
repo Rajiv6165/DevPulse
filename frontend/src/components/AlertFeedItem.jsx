@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Check, AlertCircle } from 'lucide-react'
+import { Check, AlertCircle, Loader } from 'lucide-react'
 import SeverityBadge from './SeverityBadge'
 import { formatDistanceToNow } from 'date-fns'
+import { useStore } from '../store/useStore'
 
 export const AlertFeedItem = ({ 
   id, 
@@ -12,6 +13,21 @@ export const AlertFeedItem = ({
   is_resolved, 
   onResolve 
 }) => {
+  const token = useStore((state) => state.token)
+  const isDemo = token === 'demo_jwt_token_key_devpulse'
+  const [resolving, setResolving] = useState(false)
+
+  const handleResolveClick = () => {
+    if (isDemo) {
+      setResolving(true)
+      setTimeout(() => {
+        onResolve(id)
+        setResolving(false)
+      }, 600)
+    } else {
+      onResolve(id)
+    }
+  }
   const timeAgo = created_at 
     ? formatDistanceToNow(new Date(created_at), { addSuffix: true }) 
     : 'just now'
@@ -62,11 +78,21 @@ export const AlertFeedItem = ({
 
       {!is_resolved && (
         <button
-          onClick={() => onResolve(id)}
-          className="self-end flex items-center space-x-1.5 px-2 py-0.8 bg-white/4 border border-white/6 rounded text-[9px] font-mono font-bold text-neutral-300 hover:text-accent-cyan hover:border-accent-cyan/35 hover:bg-accent-cyan/5 transition-all uppercase select-none cursor-pointer"
+          onClick={handleResolveClick}
+          disabled={resolving}
+          className="self-end flex items-center space-x-1.5 px-2 py-0.8 bg-white/4 border border-white/6 rounded text-[9px] font-mono font-bold text-neutral-300 hover:text-accent-cyan hover:border-accent-cyan/35 hover:bg-accent-cyan/5 transition-all uppercase select-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Check className="w-3 h-3 text-status-healthy" />
-          <span>RESOLVE</span>
+          {resolving ? (
+            <>
+              <Loader className="w-3 h-3 text-accent-cyan animate-spin" />
+              <span>RESOLVING...</span>
+            </>
+          ) : (
+            <>
+              <Check className="w-3 h-3 text-status-healthy" />
+              <span>RESOLVE</span>
+            </>
+          )}
         </button>
       )}
     </motion.div>

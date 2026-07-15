@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Filter, Check, LogOut, ChevronLeft } from 'lucide-react'
+import { AlertCircle, Filter, Check, LogOut, ChevronLeft, Loader } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import ConnectionStatus from '../components/ConnectionStatus'
 import SeverityBadge from '../components/SeverityBadge'
@@ -19,6 +19,7 @@ export const Alerts = () => {
   const [filterSeverity, setFilterSeverity] = useState('all')
   const [filterService, setFilterService] = useState('all')
   const [showResolved, setShowResolved] = useState(false)
+  const [resolvingIds, setResolvingIds] = useState({})
 
   // Redirect if unauthenticated
   useEffect(() => {
@@ -44,29 +45,43 @@ export const Alerts = () => {
   }, [token, showResolved])
 
   const handleResolveAlert = async (id) => {
-    resolveAlertOptimistic(id)
-    
-    if (token && token !== 'demo_jwt_token_key_devpulse') {
-      try {
-        const res = await fetch(`/api/alerts/${id}/resolve`, {
-          method: 'PATCH',
-          headers: { 'Authorization': `Bearer ${token}` }
+    const isDemo = token === 'demo_jwt_token_key_devpulse'
+    if (isDemo) {
+      setResolvingIds(prev => ({ ...prev, [id]: true }))
+      setTimeout(() => {
+        resolveAlertOptimistic(id)
+        setResolvingIds(prev => {
+          const updated = { ...prev }
+          delete updated[id]
+          return updated
         })
-        if (!res.ok) throw new Error('Failed to resolve alert')
-        fetchAlerts()
-      } catch (err) {
-        console.error(err)
+      }, 600)
+    } else {
+      resolveAlertOptimistic(id)
+      if (token && token !== 'demo_jwt_token_key_devpulse') {
+        try {
+          const res = await fetch(`/api/alerts/${id}/resolve`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          if (!res.ok) throw new Error('Failed to resolve alert')
+          fetchAlerts()
+        } catch (err) {
+          console.error(err)
+        }
       }
     }
   }
 
   // --- FILTER ALERTS IN MEMORY ---
-  const filteredAlerts = alerts.filter((alert) => {
-    const serviceMatch = filterService === 'all' || alert.service_id === filterService
-    const severityMatch = filterSeverity === 'all' || alert.severity === filterSeverity
-    const resolvedMatch = showResolved ? true : !alert.is_resolved
-    return serviceMatch && severityMatch && resolvedMatch
-  })
+  const filteredAlerts = useMemo(() => {
+    return alerts.filter((alert) => {
+      const serviceMatch = filterService === 'all' || alert.service_id === filterService
+      const severityMatch = filterSeverity === 'all' || alert.severity === filterSeverity
+      const resolvedMatch = showResolved ? true : !alert.is_resolved
+      return serviceMatch && severityMatch && resolvedMatch
+    })
+  }, [alerts, filterService, filterSeverity, showResolved])
 
   return (
     <motion.div
@@ -218,10 +233,20 @@ export const Alerts = () => {
                         ) : (
                           <button
                             onClick={() => handleResolveAlert(alert.id)}
-                            className="bg-white/5 border border-white/8 hover:bg-accent-cyan/5 hover:border-accent-cyan/30 hover:text-accent-cyan font-mono font-bold text-[9px] uppercase px-3 py-1 rounded transition-all select-none cursor-pointer inline-flex items-center space-x-1"
+                            disabled={resolvingIds[alert.id]}
+                            className="bg-white/5 border border-white/8 hover:bg-accent-cyan/5 hover:border-accent-cyan/30 hover:text-accent-cyan font-mono font-bold text-[9px] uppercase px-3 py-1 rounded transition-all select-none cursor-pointer inline-flex items-center space-x-1 disabled:opacity-50"
                           >
-                            <Check className="w-3 h-3 text-status-healthy" />
-                            <span>RESOLVE</span>
+                            {resolvingIds[alert.id] ? (
+                              <>
+                                <Loader className="w-3 h-3 text-accent-cyan animate-spin" />
+                                <span>RESOLVING...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-3 h-3 text-status-healthy" />
+                                <span>RESOLVE</span>
+                              </>
+                            )}
                           </button>
                         )}
                       </td>
