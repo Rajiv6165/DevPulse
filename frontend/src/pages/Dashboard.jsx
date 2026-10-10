@@ -524,7 +524,7 @@ export const Dashboard = () => {
 
       {/* 4. BOTTOM LOG STREAM PANEL */}
       <div className="w-full">
-        <LiveTerminal title="SYSTEM_TELEMETRY_LOG_STREAM" maxLines={100} />
+        <LiveTerminal title="SYSTEM_TELEMETRY_LOG_STREAM" maxLines={50} />
       </div>
 
     </motion.div>

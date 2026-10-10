@@ -146,7 +146,7 @@ export const useWebSocket = () => {
         message: selectedLog.message,
         timestamp: new Date()
       });
-    }, 3000);
+    }, 9000);
 
     // 2. Metrics simulation: every 10 seconds
     const metricInterval = setInterval(() => {

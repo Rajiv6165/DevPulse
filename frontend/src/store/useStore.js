@@ -144,6 +144,7 @@ export const useStore = create((set, get) => ({
 
   // --- LIVE CONSOLE STREAM LOGGER ---
   logs: initialLogs,
+  clearLogs: () => set({ logs: [] }),
   addLog: (logLine) => {
     set((state) => {
       const newLog = {
@@ -226,46 +227,51 @@ export const useStore = create((set, get) => ({
     })
 
     // Random log line injection
-    const randomService = services[Math.floor(Math.random() * services.length)].name
-    const logOptions = [
-      { level: 'INFO', message: `[${randomService}] Handled incoming request: GET /health - 200 OK` },
-      { level: 'DEBUG', message: `[${randomService}] Cache hit ratio: 89.2%` },
-      { level: 'INFO', message: `[${randomService}] Database query resolved in 14.2ms` },
-      { level: 'WARN', message: `[${randomService}] Slow query execution detected on index matching.` },
-      { level: 'DEBUG', message: `[${randomService}] Cleaned idle connection pool channels.` },
-    ]
-    
-    const isError = Math.random() < 0.05
-    if (isError) {
-      get().addLog({ level: 'ERROR', message: `[${randomService}] Error: Failed connection handshake to Redis client!` })
-      // Spawn mock alert
-      const alertId = `mock-alert-${Math.random().toString(36).substr(2, 9)}`
-      const randomServiceId = services[Math.floor(Math.random() * services.length)].id
-      const actualMessage = `CPU usage hit 94%, which is 3.2x higher than typical 29% seen at this hour. This pattern matches sudden spike.`
+    const currentTime = Date.now();
+    // Throttle to every 9000ms (between 8-10s)
+    if (!get().lastMockLogTime || currentTime - get().lastMockLogTime >= 9000) {
+      set({ lastMockLogTime: currentTime });
+      const randomService = services[Math.floor(Math.random() * services.length)].name
+      const logOptions = [
+        { level: 'INFO', message: `[${randomService}] Handled incoming request: GET /health - 200 OK` },
+        { level: 'DEBUG', message: `[${randomService}] Cache hit ratio: 89.2%` },
+        { level: 'INFO', message: `[${randomService}] Database query resolved in 14.2ms` },
+        { level: 'WARN', message: `[${randomService}] Slow query execution detected on index matching.` },
+        { level: 'DEBUG', message: `[${randomService}] Cleaned idle connection pool channels.` },
+      ]
       
-      get().addAlert({
-        id: alertId,
-        service_id: randomServiceId,
-        severity: Math.random() < 0.3 ? 'critical' : 'medium',
-        message: actualMessage,
-        is_resolved: false,
-        created_at: new Date().toISOString()
-      })
-      
-      // Spawn mock incident
-      const incidentId = `mock-inc-${Math.random().toString(36).substr(2, 9)}`
-      const affectedService = services[Math.floor(Math.random() * services.length)]
-      get().addIncident({
-        id: incidentId,
-        root_cause_service_id: randomServiceId,
-        root_cause_service_name: randomService,
-        affected_service_ids: [affectedService.id],
-        started_at: new Date().toISOString(),
-        resolved_at: null,
-        summary: `Grouped incident: ${randomService} degraded. Downstream impact detected on ${affectedService.name}.`
-      })
-    } else {
-      get().addLog(logOptions[Math.floor(Math.random() * logOptions.length)])
+      const isError = Math.random() < 0.05
+      if (isError) {
+        get().addLog({ level: 'ERROR', message: `[${randomService}] Error: Failed connection handshake to Redis client!` })
+        // Spawn mock alert
+        const alertId = `mock-alert-${Math.random().toString(36).substr(2, 9)}`
+        const randomServiceId = services[Math.floor(Math.random() * services.length)].id
+        const actualMessage = `CPU usage hit 94%, which is 3.2x higher than typical 29% seen at this hour. This pattern matches sudden spike.`
+        
+        get().addAlert({
+          id: alertId,
+          service_id: randomServiceId,
+          severity: Math.random() < 0.3 ? 'critical' : 'medium',
+          message: actualMessage,
+          is_resolved: false,
+          created_at: new Date().toISOString()
+        })
+        
+        // Spawn mock incident
+        const incidentId = `mock-inc-${Math.random().toString(36).substr(2, 9)}`
+        const affectedService = services[Math.floor(Math.random() * services.length)]
+        get().addIncident({
+          id: incidentId,
+          root_cause_service_id: randomServiceId,
+          root_cause_service_name: randomService,
+          affected_service_ids: [affectedService.id],
+          started_at: new Date().toISOString(),
+          resolved_at: null,
+          summary: `Grouped incident: ${randomService} degraded. Downstream impact detected on ${affectedService.name}.`
+        })
+      } else {
+        get().addLog(logOptions[Math.floor(Math.random() * logOptions.length)])
+      }
     }
   },
 
