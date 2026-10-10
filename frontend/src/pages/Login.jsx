@@ -17,6 +17,7 @@ export const Login = () => {
   // --- TERMINAL LOG STREAM SIMULATION ---
   const [terminalLogs, setTerminalLogs] = useState([])
   const terminalEndRef = useRef(null)
+  const intervalRef = useRef(null)
 
   useEffect(() => {
     // Scaffold initial logs
@@ -28,10 +29,10 @@ export const Login = () => {
       { level: 'WARN', msg: 'Supabase client running in direct SSL pool override mode.', time: '16:44:05' },
     ])
 
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setTerminalLogs(prev => {
         if (prev.length >= 19) {
-          clearInterval(interval);
+          clearInterval(intervalRef.current);
           if (prev.length === 19) {
             return [...prev, { level: 'INFO', msg: 'System ready. Awaiting authentication...', time: new Date().toLocaleTimeString() }];
           }
@@ -70,7 +71,7 @@ export const Login = () => {
       })
     }, 1500)
 
-    return () => clearInterval(interval)
+    return () => clearInterval(intervalRef.current)
   }, [])
 
   useEffect(() => {
