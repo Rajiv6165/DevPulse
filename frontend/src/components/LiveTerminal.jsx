@@ -24,12 +24,23 @@ LogLineItem.displayName = 'LogLineItem'
 export const LiveTerminal = ({ title = "LIVE_METRICS_STREAM", maxLines = 50 }) => {
   const logs = useStore((state) => state.logs)
   const clearLogs = useStore((state) => state.clearLogs)
+  
   const consoleRef = useRef(null)
   const isAtBottom = useRef(true)
 
   const [isPaused, setIsPaused] = useState(false)
+  const isPausedRef = useRef(false)
+  
   const [displayedLogs, setDisplayedLogs] = useState([])
-  const prevLenRef = useRef(0)
+  const logsRef = useRef(logs)
+
+  useEffect(() => {
+    logsRef.current = logs;
+    // Handle global clear event
+    if (logs.length === 0) {
+      setDisplayedLogs([]);
+    }
+  }, [logs])
 
   // Track scroll position to pause auto-scrolling if the user scrolls up
   const handleScroll = () => {
@@ -40,18 +51,49 @@ export const LiveTerminal = ({ title = "LIVE_METRICS_STREAM", maxLines = 50 }) =
   }
 
   useEffect(() => {
-    if (isPaused) return;
+    const intervalId = setInterval(() => {
+      if (isPausedRef.current) return; // skip adding new line
+      
+      setDisplayedLogs(prev => {
+        const globalLogs = logsRef.current;
+        if (!globalLogs || globalLogs.length === 0) return prev;
+        
+        if (prev.length === 0) {
+          // Add the first available log
+          return [globalLogs[0]];
+        }
+        
+        const lastDisplayed = prev[prev.length - 1];
+        let nextLog = null;
+        
+        const lastIdx = globalLogs.findIndex(l => l.id === lastDisplayed.id);
+        if (lastIdx !== -1 && lastIdx < globalLogs.length - 1) {
+          nextLog = globalLogs[lastIdx + 1];
+        } else if (lastIdx === -1) {
+          // Last displayed not found in global logs, find next chronologically
+          const lastTime = new Date(lastDisplayed.timestamp).getTime();
+          nextLog = globalLogs.find(l => new Date(l.timestamp).getTime() > lastTime);
+          if (!nextLog) {
+            nextLog = globalLogs[0]; // fallback
+          }
+        }
+        
+        if (nextLog) {
+          const next = [...prev, nextLog];
+          // Auto-pause when hitting maxLines for the first time
+          if (prev.length < maxLines && next.length >= maxLines) {
+            isPausedRef.current = true;
+            setIsPaused(true);
+          }
+          return next.slice(-maxLines);
+        }
+        
+        return prev;
+      });
+    }, 8000); // Cap interval at one new log entry every 8 seconds minimum
     
-    const newDisplayed = logs.slice(-maxLines);
-    
-    // Auto-pause when hitting maxLines for the first time
-    if (prevLenRef.current < maxLines && newDisplayed.length >= maxLines) {
-      setIsPaused(true);
-    }
-    
-    prevLenRef.current = newDisplayed.length;
-    setDisplayedLogs(newDisplayed);
-  }, [logs, isPaused, maxLines]);
+    return () => clearInterval(intervalId);
+  }, [maxLines]);
 
   useEffect(() => {
     if (isAtBottom.current && consoleRef.current) {
@@ -66,6 +108,18 @@ export const LiveTerminal = ({ title = "LIVE_METRICS_STREAM", maxLines = 50 }) =
     }
   }, [])
 
+  const handleTogglePause = () => {
+    isPausedRef.current = !isPausedRef.current;
+    setIsPaused(prev => !prev); // only for button UI update
+  }
+
+  const handleClear = () => {
+    if (clearLogs) clearLogs();
+    setDisplayedLogs([]);
+    isPausedRef.current = false;
+    setIsPaused(false);
+  }
+
   const getLogLevelStyle = (level) => {
     const norm = (level || 'INFO').toUpperCase()
     if (norm === 'ERROR') return 'text-status-critical font-bold'
@@ -75,7 +129,7 @@ export const LiveTerminal = ({ title = "LIVE_METRICS_STREAM", maxLines = 50 }) =
   }
 
   return (
-    <div className="glass-card rounded overflow-hidden flex flex-col h-[300px] max-h-[300px] font-mono text-[11px] leading-relaxed border-white/6 shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
+    <div className="glass-card rounded overflow-hidden flex flex-col h-[250px] max-h-[250px] font-mono text-[11px] leading-relaxed border-white/6 shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
       {/* Title Bar */}
       <div className="flex items-center justify-between bg-white/2 border-b border-white/6 px-4 py-2 select-none shrink-0">
         <div className="flex items-center space-x-2 text-neutral-400">
@@ -83,22 +137,16 @@ export const LiveTerminal = ({ title = "LIVE_METRICS_STREAM", maxLines = 50 }) =
           <span className="font-semibold tracking-wider text-[9px] text-neutral-300">{title}</span>
         </div>
         <div className="flex items-center space-x-3">
-          {clearLogs && (
-            <button 
-              onClick={() => {
-                clearLogs();
-                prevLenRef.current = 0;
-                setIsPaused(false);
-              }}
-              className="text-neutral-500 hover:text-white transition-colors cursor-pointer"
-              title="Clear Logs"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          )}
+          <button 
+            onClick={handleClear}
+            className="text-neutral-500 hover:text-white transition-colors cursor-pointer"
+            title="Clear Logs"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
           
           <button 
-            onClick={() => setIsPaused(!isPaused)}
+            onClick={handleTogglePause}
             className={`${isPaused ? 'text-status-warning' : 'text-neutral-500 hover:text-white'} transition-colors cursor-pointer`}
             title={isPaused ? "Play" : "Pause"}
           >
@@ -133,7 +181,7 @@ export const LiveTerminal = ({ title = "LIVE_METRICS_STREAM", maxLines = 50 }) =
         {isPaused && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
             <button 
-              onClick={() => setIsPaused(false)}
+              onClick={handleTogglePause}
               className="bg-neutral-800/95 hover:bg-neutral-700 text-white text-[10px] font-mono px-4 py-2 rounded-full border border-white/10 shadow-lg backdrop-blur-sm transition-all cursor-pointer flex items-center space-x-2"
             >
               <Play className="w-3 h-3" fill="currentColor" />
