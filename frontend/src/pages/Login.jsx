@@ -9,6 +9,7 @@ export const Login = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showBypassHint, setShowBypassHint] = useState(false)
 
   const loginStore = useStore((state) => state.login)
   const navigate = useNavigate()
@@ -28,35 +29,45 @@ export const Login = () => {
     ])
 
     const interval = setInterval(() => {
-      const msgs = [
-        { level: 'INFO', msg: 'Ingesting CPU payload from microservice: gateway-api' },
-        { level: 'DEBUG', msg: 'Redis cache hit for service schema validation' },
-        { level: 'INFO', msg: 'Sliding window metric pushed: cpu=42.1% (z=0.42)' },
-        { level: 'INFO', msg: 'Ingesting memory payload from service: payment-processor' },
-        { level: 'DEBUG', msg: 'Computing Z-score anomaly on window length=100' },
-        { level: 'INFO', msg: 'Sliding window metric pushed: memory=65.2% (z=0.18)' },
-        { level: 'WARN', msg: 'Latency threshold near warning values on gateway-api (320ms)' },
-        { level: 'INFO', msg: 'Scheduled hourly S3 log archiver check complete. 0 logs purged.' },
-      ]
-      
-      const isError = Math.random() < 0.05
-      let newLog
-      if (isError) {
-        newLog = { 
-          level: 'ERROR', 
-          msg: 'Anomaly detected in response_time: value 1250ms (Z-Score: 3.12) -> Triggering Alerts!',
-          time: new Date().toLocaleTimeString()
+      setTerminalLogs(prev => {
+        if (prev.length >= 19) {
+          clearInterval(interval);
+          if (prev.length === 19) {
+            return [...prev, { level: 'INFO', msg: 'System ready. Awaiting authentication...', time: new Date().toLocaleTimeString() }];
+          }
+          return prev;
         }
-      } else {
-        const rand = msgs[Math.floor(Math.random() * msgs.length)]
-        newLog = { 
-          level: rand.level, 
-          msg: rand.msg, 
-          time: new Date().toLocaleTimeString()
-        }
-      }
 
-      setTerminalLogs(prev => [...prev, newLog].slice(-30)) // Keep latest 30 lines
+        const msgs = [
+          { level: 'INFO', msg: 'Ingesting CPU payload from microservice: gateway-api' },
+          { level: 'DEBUG', msg: 'Redis cache hit for service schema validation' },
+          { level: 'INFO', msg: 'Sliding window metric pushed: cpu=42.1% (z=0.42)' },
+          { level: 'INFO', msg: 'Ingesting memory payload from service: payment-processor' },
+          { level: 'DEBUG', msg: 'Computing Z-score anomaly on window length=100' },
+          { level: 'INFO', msg: 'Sliding window metric pushed: memory=65.2% (z=0.18)' },
+          { level: 'WARN', msg: 'Latency threshold near warning values on gateway-api (320ms)' },
+          { level: 'INFO', msg: 'Scheduled hourly S3 log archiver check complete. 0 logs purged.' },
+        ]
+        
+        const isError = Math.random() < 0.05
+        let newLog
+        if (isError) {
+          newLog = { 
+            level: 'ERROR', 
+            msg: 'Anomaly detected in response_time: value 1250ms (Z-Score: 3.12) -> Triggering Alerts!',
+            time: new Date().toLocaleTimeString()
+          }
+        } else {
+          const rand = msgs[Math.floor(Math.random() * msgs.length)]
+          newLog = { 
+            level: rand.level, 
+            msg: rand.msg, 
+            time: new Date().toLocaleTimeString()
+          }
+        }
+
+        return [...prev, newLog]
+      })
     }, 1500)
 
     return () => clearInterval(interval)
@@ -73,6 +84,7 @@ export const Login = () => {
     e.preventDefault()
     setError('')
     setLoading(true)
+    setShowBypassHint(false)
 
     if (!email || !password) {
       setError('Please fill in all fields')
@@ -87,16 +99,28 @@ export const Login = () => {
         body: JSON.stringify({ email, password })
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Authentication failed')
+      const contentType = response.headers.get("content-type")
+      if (!response.ok || !contentType || !contentType.includes("application/json")) {
+        throw new Error("Backend not connected. Please use BYPASS_DEMO_MODE to explore the dashboard.")
       }
 
+      const data = await response.json()
       loginStore(data.access_token)
       navigate('/dashboard')
     } catch (err) {
-      setError(err.message || 'Server connection failed')
+      let errorMessage = err.message;
+      if (
+        errorMessage.includes("JSON") || 
+        errorMessage.includes("Unexpected token") || 
+        errorMessage.includes("Failed to fetch") || 
+        errorMessage.includes("NetworkError") ||
+        errorMessage === "Backend not connected. Please use BYPASS_DEMO_MODE to explore the dashboard."
+      ) {
+        errorMessage = "Backend not connected. Please use BYPASS_DEMO_MODE to explore the dashboard.";
+        setShowBypassHint(true);
+      }
+      
+      setError(errorMessage || 'Server connection failed')
     } finally {
       setLoading(false)
     }
@@ -228,7 +252,11 @@ export const Login = () => {
             {/* Quick Demo Mode Bypass */}
             <button
               onClick={handleDemoMode}
-              className="w-full bg-white/4 border border-white/8 text-neutral-300 hover:text-white hover:bg-white/8 font-mono font-bold text-[10px] uppercase py-2 rounded tracking-widest transition-all select-none cursor-pointer mt-3"
+              className={`w-full font-mono font-bold text-[10px] uppercase py-2 rounded tracking-widest transition-all select-none cursor-pointer mt-3 border ${
+                showBypassHint 
+                  ? 'bg-accent-cyan/10 border-accent-cyan text-accent-cyan shadow-[0_0_15px_rgba(0,245,255,0.4)] animate-pulse' 
+                  : 'bg-white/4 border-white/8 text-neutral-300 hover:text-white hover:bg-white/8'
+              }`}
             >
               BYPASS_DEMO_MODE
             </button>
