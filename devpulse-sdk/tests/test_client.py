@@ -6,13 +6,18 @@ from devpulse.client import DevPulseClient, get_default_client, set_default_clie
 from devpulse.exceptions import DevPulseConfigError
 
 # Configure Django settings once for the test module
-from django.conf import settings
-if not settings.configured:
-    settings.configure(
-        DEVPULSE_API_KEY="init-key",
-        DEVPULSE_SERVICE_ID="init-service",
-        DEVPULSE_BASE_URL="http://init-base.com"
-    )
+try:
+    import django
+    from django.conf import settings
+    if not settings.configured:
+        settings.configure(
+            DEVPULSE_API_KEY="init-key",
+            DEVPULSE_SERVICE_ID="init-service",
+            DEVPULSE_BASE_URL="http://init-base.com"
+        )
+    DJANGO_AVAILABLE = True
+except ImportError:
+    DJANGO_AVAILABLE = False
 
 # Automatically reset default client between tests for clean test isolation
 @pytest.fixture(autouse=True)
@@ -450,6 +455,7 @@ def test_starlette_middleware_exception():
         assert m_err["value"] == 100.0
 
 
+@pytest.mark.skipif(not DJANGO_AVAILABLE, reason="Django not installed")
 def test_django_middleware_sync():
     with patch("threading.Thread.start"):
         client = DevPulseClient(api_key="test-key", service_id="test-service")
@@ -492,6 +498,7 @@ def test_django_middleware_sync():
         assert m_err["value"] == 0.0
 
 
+@pytest.mark.skipif(not DJANGO_AVAILABLE, reason="Django not installed")
 def test_django_middleware_async():
     with patch("threading.Thread.start"):
         client = DevPulseClient(api_key="test-key", service_id="test-service")
@@ -532,6 +539,7 @@ def test_django_middleware_async():
         assert m_err["metric_type"] == "error_rate"
 
 
+@pytest.mark.skipif(not DJANGO_AVAILABLE, reason="Django not installed")
 def test_django_middleware_settings_init():
     with patch("devpulse.client.get_default_client", return_value=None):
         with patch("threading.Thread.start"):

@@ -18,6 +18,9 @@ setup(
     install_requires=[
         "requests>=2.25.0",
     ],
+    extras_require={
+        "dev": ["pytest", "responses", "django", "fastapi", "httpx"]
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.7",
