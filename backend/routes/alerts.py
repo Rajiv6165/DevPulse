@@ -1,15 +1,15 @@
-from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+
 from core.database import get_db_cursor
 from core.security import get_current_user_id
+from fastapi import APIRouter, Depends, HTTPException, status
 from models.alert import AlertResponse
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
-@router.get("/", response_model=List[AlertResponse])
+@router.get("/", response_model=list[AlertResponse])
 def list_alerts(
-    resolved: Optional[bool] = False,
+    resolved: bool | None = False,
     current_user_id: str = Depends(get_current_user_id)
 ):
     """

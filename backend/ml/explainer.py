@@ -1,4 +1,5 @@
-from typing import Any, Dict
+from typing import Any
+
 
 class Explainer:
     """Generates plain-English explanations for anomalies and predictive alerts."""
@@ -8,7 +9,7 @@ class Explainer:
         metric_type: str, 
         value: float, 
         anomaly_result: Any,
-        predictive_context: Dict[str, Any] = None
+        predictive_context: dict[str, Any] | None = None
     ) -> str:
         """
         Builds a deterministic, readable summary explaining why a value is flagged,

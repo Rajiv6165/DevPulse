@@ -1,13 +1,13 @@
 import secrets
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+
 from core.database import get_db_cursor
 from core.security import get_current_user_id
+from fastapi import APIRouter, Depends, HTTPException, status
 from models.service import ServiceCreate, ServiceResponse
 
 router = APIRouter(prefix="/services", tags=["services"])
 
-@router.get("/", response_model=List[ServiceResponse])
+@router.get("/", response_model=list[ServiceResponse])
 def list_services(current_user_id: str = Depends(get_current_user_id)):
     """Retrieve all services owned by the authenticated user."""
     with get_db_cursor() as cur:
@@ -44,7 +44,7 @@ def create_service(payload: ServiceCreate, current_user_id: str = Depends(get_cu
     except Exception as e:
          raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error during service creation: {str(e)}"
+            detail=f"Database error during service creation: {e!s}"
         )
         
     return new_service

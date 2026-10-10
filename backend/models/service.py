@@ -1,16 +1,17 @@
-from pydantic import BaseModel
 from datetime import datetime
 from uuid import UUID
-from typing import Optional
+
+from pydantic import BaseModel
+
 
 class ServiceCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
 class ServiceResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     api_key: str
     owner_id: UUID
     created_at: datetime

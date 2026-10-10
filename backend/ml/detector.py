@@ -1,17 +1,20 @@
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
-from pydantic import BaseModel
-from ml.zscore import ZScoreDetector
-from ml.isolation_forest import IsolationForestDetector
+from datetime import UTC, datetime
+from typing import Any
+
 from core.redis import async_redis_client
+from pydantic import BaseModel
+
+from ml.isolation_forest import IsolationForestDetector
+from ml.zscore import ZScoreDetector
+
 
 class AnomalyResult(BaseModel):
     is_anomaly: bool
     confidence: float  # 0 to 1
     severity: str  # "low" | "medium" | "critical"
-    contributing_methods: List[str]
+    contributing_methods: list[str]
     explanation: str
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
 class AnomalyDetector:
     """Coordinates ensemble anomaly detection: rolling z-score, seasonal time-of-day, and Isolation Forest."""
@@ -34,7 +37,7 @@ class AnomalyDetector:
         service_id: str, 
         metric_type: str, 
         value: float, 
-        history: Optional[list] = None
+        history: list | None = None
     ) -> AnomalyResult:
         """
         Runs three detection methods, computes weighted confidence, and updates seasonal baseline.
@@ -49,7 +52,7 @@ class AnomalyDetector:
         zscore_score = min(1.0, z_score / 4.0)
 
         # 2. Isolation Forest score
-        is_if_anomaly, if_score = await self.iforest_detector.score(
+        _is_if_anomaly, if_score = await self.iforest_detector.score(
             service_id_str, metric_type, value
         )
         # Scale iforest score (default range is up to 6.0) to 0.0 - 1.0. Fallback to zscore if no model.
@@ -59,7 +62,7 @@ class AnomalyDetector:
             iforest_score = zscore_score
 
         # 3. Seasonal deviation (decompose into hourly averages)
-        hour_of_day = datetime.now(timezone.utc).hour
+        hour_of_day = datetime.now(UTC).hour
         seasonal_key = f"devpulse:seasonal:{service_id_str}:{metric_type}:{hour_of_day}"
         
         # Retrieve old hourly average

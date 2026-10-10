@@ -2,6 +2,7 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+
 # 1. Setup mock modules for missing backend dependencies to run completely offline
 class MockUniqueViolation(Exception):
     pass

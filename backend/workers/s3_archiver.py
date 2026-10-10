@@ -1,6 +1,7 @@
-import json
 import asyncio
-from datetime import datetime, timezone
+import json
+from datetime import UTC, datetime
+
 from core.config import settings
 from core.database import get_db_cursor
 
@@ -56,7 +57,7 @@ async def archive_service_metrics(service_id: str, service_name: str) -> int:
     jsonl_content = "\n".join(jsonl_lines)
 
     # 3. Create the S3 partition key path
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key_path = f"logs/{now.year}/{now.month:02d}/{now.day:02d}/{service_id}.jsonl"
 
     # 4. Upload to S3 (run in execution thread to keep loop unblocked)

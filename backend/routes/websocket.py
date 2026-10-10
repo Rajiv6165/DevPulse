@@ -1,9 +1,9 @@
 import asyncio
-from typing import Optional
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+
 from core.database import get_db_cursor
 from core.security import decode_access_token
 from core.websocket_manager import manager
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 router = APIRouter(tags=["websockets"])
 
@@ -58,7 +58,7 @@ async def metrics_writer_loop(websocket: WebSocket, user_id: str):
 @router.websocket("/ws/live")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None)
+    token: str | None = Query(None)
 ):
     """
     WebSocket endpoint for real-time DevOps observability data.

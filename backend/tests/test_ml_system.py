@@ -1,8 +1,9 @@
 import os
 import sys
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch, AsyncMock
 
 # Add backend directory to path
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,14 +11,13 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 
+import asyncio
+
+from ml.correlator import IncidentCorrelator
+from ml.explainer import Explainer
+from ml.forecaster import Forecaster
 from ml.zscore import ZScoreDetector
 
-
-from ml.forecaster import Forecaster
-from ml.explainer import Explainer
-from ml.correlator import IncidentCorrelator
-
-import asyncio
 
 # --- Test Z-Score Detector ---
 def test_zscore_detector_push_and_get():
@@ -120,7 +120,7 @@ def test_correlator_grouping(mock_db_cursor):
     correlator = IncidentCorrelator()
     
     # Mock other anomalies in the 2-minute window: one for service-2
-    detected_at = datetime.now(timezone.utc)
+    detected_at = datetime.now(UTC)
     other_anoms = [{"service_id": "service-2", "metric_type": "memory", "detected_at": detected_at}]
     
     # Mock SQL execution return values

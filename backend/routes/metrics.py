@@ -1,11 +1,11 @@
 import json
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+
 from core.database import get_db_cursor
 from core.redis import async_redis_client
-from core.security import get_current_user_id, decode_access_token
+from core.security import decode_access_token, get_current_user_id
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from models.metric import MetricIngest, MetricResponse, MetricType
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
@@ -13,8 +13,8 @@ router = APIRouter(prefix="/metrics", tags=["metrics"])
 @router.post("/ingest", response_model=MetricResponse, status_code=status.HTTP_201_CREATED)
 async def ingest_metric(
     payload: MetricIngest,
-    x_api_key: Optional[str] = Header(None),
-    authorization: Optional[str] = Header(None)
+    x_api_key: str | None = Header(None),
+    authorization: str | None = Header(None)
 ):
     """
     Ingest a new metric. Accepts either JWT Bearer Token (for UI requests)
@@ -67,7 +67,7 @@ async def ingest_metric(
         )
 
     # 2. Insert into PostgreSQL
-    ts = payload.timestamp if payload.timestamp else datetime.now(timezone.utc)
+    ts = payload.timestamp if payload.timestamp else datetime.now(UTC)
     try:
         with get_db_cursor() as cur:
             cur.execute(
@@ -80,7 +80,7 @@ async def ingest_metric(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to record metric in database: {str(e)}"
+            detail=f"Failed to record metric in database: {e!s}"
         )
 
     # 3. Push to Upstash Redis Stream
@@ -105,10 +105,10 @@ async def ingest_metric(
 
     return inserted
 
-@router.get("/{service_id}", response_model=List[MetricResponse])
+@router.get("/{service_id}", response_model=list[MetricResponse])
 def get_metrics(
     service_id: UUID,
-    metric_type: Optional[MetricType] = None,
+    metric_type: MetricType | None = None,
     limit: int = 100,
     current_user_id: str = Depends(get_current_user_id)
 ):

@@ -1,13 +1,14 @@
 import asyncio
 import json
+
 from core.database import get_db_cursor
+from core.notifications import dispatch_anomaly_notifications
 from core.redis import async_redis_client
 from core.websocket_manager import manager
-from core.notifications import dispatch_anomaly_notifications
-from ml.detector import AnomalyDetector
-from ml.forecaster import Forecaster
 from ml.correlator import IncidentCorrelator
+from ml.detector import AnomalyDetector
 from ml.explainer import Explainer
+from ml.forecaster import Forecaster
 
 # Global shared detector instance
 detector = AnomalyDetector()
@@ -187,7 +188,6 @@ async def process_metric_message(msg_id: str, payload: dict):
 
 async def run_anomaly_worker():
     """Main worker loop pulling from Upstash Redis stream."""
-    global worker_running
     print("[Worker] Starting anomaly detection stream consumer...")
     await init_consumer_group()
     

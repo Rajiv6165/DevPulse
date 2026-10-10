@@ -1,10 +1,11 @@
-from typing import List
+from datetime import UTC
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel
+
 from core.database import get_db_cursor
 from core.security import get_current_user_id
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from models.alert import AnomalyResponse
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -15,7 +16,7 @@ class ServiceSummaryResponse(BaseModel):
     anomaly_count: int
     health_score: float
 
-@router.get("/{service_id}/anomalies", response_model=List[AnomalyResponse])
+@router.get("/{service_id}/anomalies", response_model=list[AnomalyResponse])
 def get_service_anomalies(
     service_id: UUID,
     hours: int = Query(default=24, ge=1, le=168),
@@ -122,9 +123,10 @@ async def get_service_forecast(
 ):
     """Generates next 15-minute forecast curve for a metric type."""
     import time
-    from datetime import datetime, timezone
-    from ml.zscore import ZScoreDetector
+    from datetime import datetime
+
     from ml.forecaster import Forecaster
+    from ml.zscore import ZScoreDetector
 
     service_id_str = str(service_id)
     
@@ -171,7 +173,7 @@ async def get_service_forecast(
     current_time = time.time()
     forecast_points = []
     
-    for offset_min in range(0, 16):
+    for offset_min in range(16):
         t = current_time + (offset_min * 60.0)
         pred_val = (slope * t) + intercept
         
@@ -182,7 +184,7 @@ async def get_service_forecast(
             pred_val = max(0.0, pred_val)
             
         forecast_points.append({
-            "timestamp": datetime.fromtimestamp(t, timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(t, UTC).isoformat(),
             "value": round(pred_val, 2)
         })
 

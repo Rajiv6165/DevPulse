@@ -1,6 +1,7 @@
 import os
-from typing import List, Optional
+
 from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
@@ -19,20 +20,20 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
     # Slack Webhook for Alerts
-    SLACK_WEBHOOK_URL: Optional[str] = None
+    SLACK_WEBHOOK_URL: str | None = None
 
     # Resend API configuration
-    RESEND_API_KEY: Optional[str] = None
+    RESEND_API_KEY: str | None = None
     RESEND_SENDER_EMAIL: str = "alerts@yourdomain.com"
 
     # AWS S3 Settings
-    AWS_ACCESS_KEY_ID: Optional[str] = None
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_ACCESS_KEY_ID: str | None = None
+    AWS_SECRET_ACCESS_KEY: str | None = None
     AWS_REGION: str = "us-east-1"
-    AWS_S3_BUCKET_NAME: Optional[str] = None
+    AWS_S3_BUCKET_NAME: str | None = None
 
     @property
-    def cors_origins_list(self) -> List[str]:
+    def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     class Config:

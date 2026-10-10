@@ -1,8 +1,8 @@
-from fastapi import APIRouter, HTTPException, status
-from psycopg2.errors import UniqueViolation
 from core.database import get_db_cursor
-from core.security import get_password_hash, verify_password, create_access_token
-from models.user import UserRegister, UserLogin, TokenResponse
+from core.security import create_access_token, get_password_hash, verify_password
+from fastapi import APIRouter, HTTPException, status
+from models.user import TokenResponse, UserLogin, UserRegister
+from psycopg2.errors import UniqueViolation
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -34,7 +34,7 @@ def register(payload: UserRegister):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error occurred: {str(e)}"
+            detail=f"Database error occurred: {e!s}"
         )
         
     access_token = create_access_token(data={"sub": str(user_id)})

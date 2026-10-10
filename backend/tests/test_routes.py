@@ -1,7 +1,7 @@
 import os
 import sys
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, AsyncMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add backend directory to path
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,6 +10,7 @@ if backend_dir not in sys.path:
 
 # Override security methods BEFORE importing the rest of the application
 import core.security
+
 core.security.get_password_hash = lambda password: f"hashed-{password}"
 core.security.verify_password = lambda plain, hashed: hashed == f"hashed-{plain}"
 core.security.create_access_token = lambda data, expires_delta=None: f"token-{data['sub']}"
@@ -23,10 +24,10 @@ patcher_stop.start()
 
 
 import pytest
-from psycopg2.errors import UniqueViolation
+from core.security import create_access_token, get_password_hash
 from fastapi.testclient import TestClient
 from main import app
-from core.security import get_password_hash, create_access_token
+from psycopg2.errors import UniqueViolation
 
 # Create a test client
 client = TestClient(app)
@@ -136,7 +137,7 @@ def test_list_services_route(mock_db, auth_headers):
             "description": "Vue frontend gateway",
             "api_key": "dp_abcdef",
             "owner_id": "99999999-9999-9999-9999-999999999999",
-            "created_at": datetime.now(timezone.utc),
+            "created_at": datetime.now(UTC),
             "is_active": True
         }
     ]
@@ -155,7 +156,7 @@ def test_create_service_route(mock_db, auth_headers):
         "description": "Postgres replica logs",
         "api_key": "dp_xyz123",
         "owner_id": "99999999-9999-9999-9999-999999999999",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "is_active": True
     }
     
@@ -178,7 +179,7 @@ def test_ingest_metric_with_sdk_api_key(mock_db):
             "service_id": "12345678-1234-5678-1234-567812345678",
             "metric_type": "cpu",
             "value": 67.5,
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": datetime.now(UTC),
             "metadata": {"source": "test"}
         }
     ]
@@ -204,7 +205,7 @@ def test_get_historical_metrics(mock_db, auth_headers):
             "service_id": "12345678-1234-5678-1234-567812345678",
             "metric_type": "memory",
             "value": 45.2,
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": datetime.now(UTC),
             "metadata": {}
         }
     ]
@@ -225,7 +226,7 @@ def test_list_unresolved_alerts(mock_db, auth_headers):
             "severity": "critical",
             "message": "High CPU utilization outlying threshold",
             "is_resolved": False,
-            "created_at": datetime.now(timezone.utc),
+            "created_at": datetime.now(UTC),
             "resolved_at": None
         }
     ]
@@ -245,8 +246,8 @@ def test_resolve_alert_success(mock_db, auth_headers):
         "severity": "medium",
         "message": "Out of memory",
         "is_resolved": True,
-        "created_at": datetime.now(timezone.utc),
-        "resolved_at": datetime.now(timezone.utc)
+        "created_at": datetime.now(UTC),
+        "resolved_at": datetime.now(UTC)
     }
     
     response = client.patch("/alerts/98765432-5678-1234-5678-123456789abc/resolve", headers=auth_headers)

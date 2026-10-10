@@ -1,8 +1,10 @@
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
-from supabase import create_client, Client
+
+import psycopg2
 from core.config import settings
+from psycopg2.extras import RealDictCursor
+
+from supabase import Client, create_client
 
 # Initialize the Supabase Client
 try:
@@ -23,14 +25,13 @@ def get_db_connection():
 @contextmanager
 def get_db_cursor():
     """Context manager for obtaining a database cursor with automatic transaction handling."""
-    with get_db_connection() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            try:
-                yield cur
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                raise e
+    with get_db_connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        try:
+            yield cur
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 def init_db():
     """Initializes database tables like incidents if they don't exist."""

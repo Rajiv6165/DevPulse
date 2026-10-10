@@ -1,13 +1,15 @@
-import math
 import json
+import math
 import time
-from typing import List, Tuple, Dict, Any
+from typing import Any
+
 from core.redis import async_redis_client
+
 
 class ZScoreDetector:
     """Calculates rolling Z-scores using a sliding window of size 100 stored in Redis."""
     
-    async def push_and_get_window(self, service_id: str, metric_type: str, value: float) -> List[float]:
+    async def push_and_get_window(self, service_id: str, metric_type: str, value: float) -> list[float]:
         """Pushes a new value to the Redis list and returns the entire active window."""
         key = f"devpulse:window:{service_id}:{metric_type}"
         
@@ -31,7 +33,7 @@ class ZScoreDetector:
                     pass
         return values
 
-    async def get_timestamped_window(self, service_id: str, metric_type: str) -> List[Dict[str, Any]]:
+    async def get_timestamped_window(self, service_id: str, metric_type: str) -> list[dict[str, Any]]:
         """
         Retrieves the window of metric entries, returning a list of dicts with t (timestamp) and v (value).
         Returns them sorted chronologically (oldest first).
@@ -54,7 +56,7 @@ class ZScoreDetector:
         results.reverse()
         return results
 
-    def calculate_stats(self, values: List[float]) -> Tuple[float, float]:
+    def calculate_stats(self, values: list[float]) -> tuple[float, float]:
         """Computes the mean and standard deviation for a set of values."""
         if not values:
             return 0.0, 0.0
@@ -64,7 +66,7 @@ class ZScoreDetector:
         std_dev = math.sqrt(variance)
         return mean, std_dev
 
-    async def score(self, service_id: str, metric_type: str, value: float) -> Tuple[float, float, float]:
+    async def score(self, service_id: str, metric_type: str, value: float) -> tuple[float, float, float]:
         """
         Ingests a value, updates the sliding window in Redis, and scores the current reading.
         Returns a tuple of (z_score, rolling_mean, rolling_std).

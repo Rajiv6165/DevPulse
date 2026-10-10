@@ -1,12 +1,14 @@
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any
+
 from core.database import get_db_cursor
+
 
 class IncidentCorrelator:
     """Correlates anomalies across metrics and services to identify root causes and group incidents."""
 
-    def _get_service_names(self, service_ids: List[str]) -> Dict[str, str]:
+    def _get_service_names(self, service_ids: list[str]) -> dict[str, str]:
         """Resolves service IDs to service names for formatting summaries."""
         if not service_ids:
             return {}
@@ -28,7 +30,7 @@ class IncidentCorrelator:
         service_id: str, 
         metric_type: str, 
         detected_at: datetime
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Invoked when an anomaly is detected.
         Checks for concurrent anomalies within a 2-minute window.

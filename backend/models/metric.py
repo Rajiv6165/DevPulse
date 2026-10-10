@@ -1,8 +1,10 @@
-from pydantic import BaseModel, Field
 from datetime import datetime
-from uuid import UUID
 from enum import Enum
-from typing import Dict, Any, Optional
+from typing import Any, ClassVar
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
 
 class MetricType(str, Enum):
     CPU = "cpu"
@@ -15,8 +17,8 @@ class MetricIngest(BaseModel):
     service_id: UUID
     metric_type: MetricType
     value: float
-    timestamp: Optional[datetime] = Field(default_factory=datetime.utcnow)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime | None = Field(default_factory=datetime.utcnow)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 class MetricResponse(BaseModel):
     id: UUID
@@ -24,10 +26,10 @@ class MetricResponse(BaseModel):
     metric_type: MetricType
     value: float
     timestamp: datetime
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
     class Config:
         from_attributes = True
-        json_encoders = {
+        json_encoders: ClassVar[dict] = {
             datetime: lambda v: v.isoformat()
         }

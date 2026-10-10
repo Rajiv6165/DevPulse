@@ -1,6 +1,6 @@
+from core.config import settings
 from upstash_redis import Redis
 from upstash_redis.asyncio import Redis as AsyncRedis
-from core.config import settings
 
 # Initialize Upstash Redis Synchronous client
 redis_client = Redis(

@@ -1,8 +1,9 @@
 import asyncio
+from datetime import datetime
+from typing import Any
+
 import httpx
 import resend
-from datetime import datetime
-from typing import List, Dict, Any, Optional
 from core.config import settings
 from core.database import get_db_cursor
 from core.redis import async_redis_client
@@ -29,7 +30,7 @@ async def check_cooldown(service_id: str, metric_type: str) -> bool:
         # Default to false in case of Redis failure so we don't block critical notifications
         return False
 
-async def get_alert_context(service_id: str, metric_type: str) -> Dict[str, Any]:
+async def get_alert_context(service_id: str, metric_type: str) -> dict[str, Any]:
     """Retrieves service owner email, service name, and historical metrics for alert copy."""
     context = {
         "service_name": "Unknown Service",
@@ -76,8 +77,8 @@ async def send_slack_alert(
     severity: str, 
     timestamp: datetime,
     explanation: str,
-    incident_context: Optional[Dict[str, Any]] = None,
-    predictive_context: Optional[Dict[str, Any]] = None
+    incident_context: dict[str, Any] | None = None,
+    predictive_context: dict[str, Any] | None = None
 ):
     """Sends a rich Slack Block Kit notification containing explanations, trends, and incident grouping."""
     if not settings.SLACK_WEBHOOK_URL:
@@ -182,10 +183,10 @@ async def send_email_alert(
     value: float, 
     severity: str, 
     timestamp: datetime, 
-    recent_metrics: List[Dict[str, Any]],
+    recent_metrics: list[dict[str, Any]],
     explanation: str,
-    incident_context: Optional[Dict[str, Any]] = None,
-    predictive_context: Optional[Dict[str, Any]] = None
+    incident_context: dict[str, Any] | None = None,
+    predictive_context: dict[str, Any] | None = None
 ):
     """Sends a formatted HTML email alert card using Resend API."""
     if not settings.RESEND_API_KEY:
@@ -301,8 +302,8 @@ async def dispatch_anomaly_notifications(
     severity: str, 
     timestamp: datetime,
     explanation: str,
-    incident_context: Optional[Dict[str, Any]] = None,
-    predictive_context: Optional[Dict[str, Any]] = None
+    incident_context: dict[str, Any] | None = None,
+    predictive_context: dict[str, Any] | None = None
 ):
     """
     Orchestrates checking notification rate-limits and spawning

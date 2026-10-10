@@ -1,6 +1,6 @@
 import base64
 import pickle
-from typing import Tuple
+
 from core.redis import async_redis_client
 
 # Graceful imports to accommodate environment constraints
@@ -27,7 +27,7 @@ async def load_model(service_id: str, metric_type: str):
 class IsolationForestDetector:
     """Scores metrics using a pre-trained scikit-learn Isolation Forest model."""
     
-    async def score(self, service_id: str, metric_type: str, value: float) -> Tuple[bool, float]:
+    async def score(self, service_id: str, metric_type: str, value: float) -> tuple[bool, float]:
         """
         Calculates if the given value is an anomaly using the stored Isolation Forest model.
         Returns: (is_anomaly, score)

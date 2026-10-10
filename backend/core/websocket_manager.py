@@ -1,10 +1,12 @@
-from typing import Dict, Set, Any
+from typing import Any
+
 from fastapi import WebSocket
+
 
 class ConnectionManager:
     def __init__(self):
         # Map of user_id (str) -> Set of active WebSockets
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        self.active_connections: dict[str, set[WebSocket]] = {}
 
     async def connect(self, user_id: str, websocket: WebSocket):
         """Accept connection and track it under the user's ID."""

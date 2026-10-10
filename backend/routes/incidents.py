@@ -1,14 +1,14 @@
-from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
 from core.database import get_db_cursor
 from core.security import get_current_user_id
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
 @router.get("/")
 def list_incidents(
-    active: Optional[bool] = Query(default=None),
+    active: bool | None = Query(default=None),
     current_user_id: str = Depends(get_current_user_id)
 ):
     """

@@ -1,15 +1,16 @@
 import logging
 import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.config import settings
 from core.database import init_db
 from core.websocket_manager import manager
-from routes import auth, services, metrics, alerts, websocket, analytics, incidents
-from workers.anomaly_worker import start_worker, stop_worker
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from ml.trainer import retrain_all_models
+from routes import alerts, analytics, auth, incidents, metrics, services, websocket
+from workers.anomaly_worker import start_worker, stop_worker
 from workers.s3_archiver import run_log_archiver
 
 # 1. Setup Logging Configuration
